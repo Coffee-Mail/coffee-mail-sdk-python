@@ -42,8 +42,9 @@ dev = [
 
 [project.urls]
 Homepage = "https://coffeemail.com.br"
-Documentation = "https://docs.coffeemail.com.br"
-Repository = "https://github.com/coffeemail/coffee-mail-sdk-python"
+Documentation = "https://coffeemail.com.br/docs/sdk"
+Repository = "https://github.com/Coffee-Mail/coffee-mail-sdk-python"
+Issues = "https://github.com/Coffee-Mail/coffee-mail-sdk-python/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/coffeemail"]
