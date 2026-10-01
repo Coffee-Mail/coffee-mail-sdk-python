@@ -1,13 +1,10 @@
-from typing import Any
-
-
 class CoffeeMailError(Exception):
     def __init__(
         self,
         message: str,
         status_code: int | None = None,
         code: str | None = None,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -55,7 +52,7 @@ class NetworkError(CoffeeMailError):
 
 def create_error_from_response(
     status_code: int,
-    body: dict[str, Any] | None = None,
+    body: dict[str, object] | None = None,
     default_message: str | None = None,
 ) -> CoffeeMailError:
     data = body or {}

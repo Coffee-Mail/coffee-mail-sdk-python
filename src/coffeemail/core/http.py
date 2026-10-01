@@ -97,17 +97,24 @@ class HttpTransport(BaseTransport):
             return CoffeeMailResponse(data=None, error=err, status_code=None)
 
         if not response.is_success:
+            body: dict[str, object] = {"message": response.text}
             try:
-                body = response.json()
+                parsed_body = response.json()
+                if isinstance(parsed_body, dict):
+                    body = parsed_body
             except Exception:
-                body = {"message": response.text}
+                pass
             error = create_error_from_response(response.status_code, body)
             return CoffeeMailResponse(data=None, error=error, status_code=response.status_code)
 
-        try:
-            data = response.json() if response.content else {}
-        except Exception:
-            data = {}
+        data: dict[str, object] = {}
+        if response.content:
+            try:
+                parsed_data = response.json()
+                if isinstance(parsed_data, dict):
+                    data = parsed_data
+            except Exception:
+                data = {}
 
         return CoffeeMailResponse(data=data, error=None, status_code=response.status_code)
 
@@ -186,17 +193,24 @@ class AsyncHttpTransport(BaseTransport):
             return CoffeeMailResponse(data=None, error=err, status_code=None)
 
         if not response.is_success:
+            body: dict[str, object] = {"message": response.text}
             try:
-                body = response.json()
+                parsed_body = response.json()
+                if isinstance(parsed_body, dict):
+                    body = parsed_body
             except Exception:
-                body = {"message": response.text}
+                pass
             error = create_error_from_response(response.status_code, body)
             return CoffeeMailResponse(data=None, error=error, status_code=response.status_code)
 
-        try:
-            data = response.json() if response.content else {}
-        except Exception:
-            data = {}
+        data: dict[str, object] = {}
+        if response.content:
+            try:
+                parsed_data = response.json()
+                if isinstance(parsed_data, dict):
+                    data = parsed_data
+            except Exception:
+                data = {}
 
         return CoffeeMailResponse(data=data, error=None, status_code=response.status_code)
 
