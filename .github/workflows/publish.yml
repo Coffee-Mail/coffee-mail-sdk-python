@@ -1,0 +1,61 @@
+name: Publish to PyPI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+
+jobs:
+  validate-and-publish:
+    name: Build, verify and publish to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Necessário para Trusted Publishing (OIDC) no PyPI
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Code quality and tests
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+          uv run mypy src tests
+          uv run pytest -v
+
+      - name: Check if current version is already on PyPI
+        id: check_version
+        run: |
+          VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "Package version: $VERSION"
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/coffeemail/$VERSION/json")
+          if [ "$STATUS_CODE" = "200" ]; then
+            echo "Version $VERSION is already published on PyPI. Skipping publication."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version $VERSION ready for publication."
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build distribution packages (wheel and sdist)
+        if: steps.check_version.outputs.should_publish == 'true'
+        run: uv build
+
+      - name: Publish to PyPI via Trusted Publishing
+        if: steps.check_version.outputs.should_publish == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
