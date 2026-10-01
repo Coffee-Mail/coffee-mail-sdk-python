@@ -1,4 +1,5 @@
 import base64
+from collections.abc import Sequence
 from pathlib import Path
 
 from coffeemail.core.errors import ValidationError
@@ -39,14 +40,14 @@ def _normalize_participants(
     items: str
     | EmailParticipant
     | dict[str, object]
-    | list[str | EmailParticipant | dict[str, object]]
+    | Sequence[str | EmailParticipant | dict[str, object]]
     | None,
 ) -> list[dict[str, object]] | None:
-    if items is None:
-        return None
-    if isinstance(items, list):
+    if isinstance(items, (list, tuple)):
         return [_normalize_participant(i) for i in items]
-    return [_normalize_participant(items)]
+    if isinstance(items, (str, EmailParticipant, dict)):
+        return [_normalize_participant(items)]
+    return None
 
 
 def _serialize_attachment(
