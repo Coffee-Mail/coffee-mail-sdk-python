@@ -1,4 +1,5 @@
 import base64
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -15,22 +16,43 @@ from coffeemail.models.emails import (
     SendEmailResponse,
 )
 
+_NAMED_EMAIL_PATTERN = re.compile(r"^(?:(?P<name>.*?)\s*<)?(?P<email>[^<>\s]+)>?$")
+
+
+def _parse_participant_string(item: str) -> dict[str, object]:
+    trimmed = item.strip()
+    match = _NAMED_EMAIL_PATTERN.match(trimmed)
+    if not match:
+        return {"email": trimmed}
+
+    email = match.group("email").strip()
+    raw_name = match.group("name")
+    name = raw_name.strip().strip("\"'") if raw_name else None
+    if not name:
+        return {"email": email}
+
+    return {"email": email, "name": name}
+
 
 def _normalize_participant(
     item: str | EmailParticipant | dict[str, object],
 ) -> dict[str, object]:
     if isinstance(item, str):
-        return {"email": item.strip()}
+        return _parse_participant_string(item)
+
     if isinstance(item, EmailParticipant):
         payload: dict[str, object] = {"email": item.email.strip()}
         if item.name:
             payload["name"] = item.name.strip()
         return payload
-    if isinstance(item, dict) and "email" in item:
+
+    is_valid_dict = isinstance(item, dict) and "email" in item
+    if is_valid_dict:
         payload = {"email": str(item["email"]).strip()}
         if item.get("name"):
             payload["name"] = str(item["name"]).strip()
         return payload
+
     raise ValidationError(
         "Destinatário inválido. Forneça uma string com e-mail ou objeto com campo 'email'."
     )

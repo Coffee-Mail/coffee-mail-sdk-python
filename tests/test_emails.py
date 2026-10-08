@@ -11,6 +11,11 @@ def test_normalize_participant_from_string() -> None:
     assert res == {"email": "teste@dominio.com"}
 
 
+def test_normalize_participant_from_named_string() -> None:
+    res = _normalize_participant("Empresa Teste <contato@empresa.com>")
+    assert res == {"email": "contato@empresa.com", "name": "Empresa Teste"}
+
+
 def test_normalize_participant_from_model() -> None:
     model = EmailParticipant(email="suporte@dominio.com", name="Suporte CoffeeMail")
     res = _normalize_participant(model)
