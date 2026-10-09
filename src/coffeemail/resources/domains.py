@@ -52,6 +52,12 @@ class Domains:
     def delete(self, domain_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return self._transport.request("DELETE", f"/v1/product/domains/{domain_id}")
 
+    def get_health(self, domain_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("POST", f"/v1/product/domains/{domain_id}/health")
+
+    def get_warmup_status(self, domain_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("GET", f"/v1/product/domains/{domain_id}/warmup")
+
 
 class AsyncDomains:
     def __init__(self, transport: AsyncHttpTransport) -> None:
@@ -97,3 +103,9 @@ class AsyncDomains:
 
     async def delete(self, domain_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return await self._transport.request("DELETE", f"/v1/product/domains/{domain_id}")
+
+    async def get_health(self, domain_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request("POST", f"/v1/product/domains/{domain_id}/health")
+
+    async def get_warmup_status(self, domain_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request("GET", f"/v1/product/domains/{domain_id}/warmup")

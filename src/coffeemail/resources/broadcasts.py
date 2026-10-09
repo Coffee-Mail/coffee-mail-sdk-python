@@ -1,3 +1,4 @@
+from coffeemail.core.errors import ValidationError
 from coffeemail.core.http import AsyncHttpTransport, HttpTransport
 from coffeemail.core.types import CoffeeMailResponse
 from coffeemail.models.broadcasts import (
@@ -76,7 +77,26 @@ class Broadcasts:
         return self._transport.request("POST", f"/v1/product/broadcasts/{broadcast_id}/cancel")
 
     def delete(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("DELETE", f"/v1/product/broadcasts/{broadcast_id}")
+        """Nao suportado pela API CoffeeMail. Use cancel().
+
+        Mantido para nao quebrar a assinatura publica. Falha de imediato, sem
+        chamada de rede, em vez de devolver um 404 que sugere campanha inexistente.
+        """
+        del broadcast_id
+        return CoffeeMailResponse(
+            data=None,
+            error=ValidationError(
+                "Exclusao de campanha nao e suportada pela API CoffeeMail. Use cancel()."
+            ),
+            status_code=None,
+        )
+
+    def test_send(
+        self, broadcast_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "POST", f"/v1/product/broadcasts/{broadcast_id}/test-send", json_data=payload
+        )
 
 
 class AsyncBroadcasts:
@@ -151,4 +171,23 @@ class AsyncBroadcasts:
         )
 
     async def delete(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request("DELETE", f"/v1/product/broadcasts/{broadcast_id}")
+        """Nao suportado pela API CoffeeMail. Use cancel().
+
+        Mantido para nao quebrar a assinatura publica. Falha de imediato, sem
+        chamada de rede, em vez de devolver um 404 que sugere campanha inexistente.
+        """
+        del broadcast_id
+        return CoffeeMailResponse(
+            data=None,
+            error=ValidationError(
+                "Exclusao de campanha nao e suportada pela API CoffeeMail. Use cancel()."
+            ),
+            status_code=None,
+        )
+
+    async def test_send(
+        self, broadcast_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "POST", f"/v1/product/broadcasts/{broadcast_id}/test-send", json_data=payload
+        )

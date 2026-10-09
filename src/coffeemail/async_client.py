@@ -9,6 +9,7 @@ from coffeemail.resources.audiences import AsyncAudiences
 from coffeemail.resources.broadcasts import AsyncBroadcasts
 from coffeemail.resources.domains import AsyncDomains
 from coffeemail.resources.emails import AsyncEmails
+from coffeemail.resources.senders import AsyncSenders
 from coffeemail.resources.stats import AsyncStats
 from coffeemail.resources.suppressions import AsyncSuppressions
 from coffeemail.resources.templates import AsyncTemplates
@@ -39,6 +40,7 @@ class AsyncCoffeeMail:
         self.templates = AsyncTemplates(self._transport)
         self.audiences = AsyncAudiences(self._transport)
         self.broadcasts = AsyncBroadcasts(self._transport)
+        self.senders = AsyncSenders(self._transport)
         self.suppressions = AsyncSuppressions(self._transport)
         self.webhooks = AsyncWebhooks(self._transport)
         self.stats = AsyncStats(self._transport)

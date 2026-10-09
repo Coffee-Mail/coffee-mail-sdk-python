@@ -65,6 +65,7 @@ select = [
     "ARG", # flake8-unused-arguments
     "SIM", # flake8-simplify
     "TCH", # flake8-type-checking
+    "RET", # flake8-return: barra else/elif desnecessarios apos return
 ]
 ignore = ["E501"]
 

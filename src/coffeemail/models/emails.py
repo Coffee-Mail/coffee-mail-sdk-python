@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,16 +62,29 @@ class SendEmailPayload(BaseModel):
 class SendEmailResponse(BaseModel):
     id: str
     status: EmailStatus
-    created_at: str | None = Field(default=None, alias="createdAt")
+    queued_at: str | None = Field(default=None, alias="queuedAt")
 
     model_config = ConfigDict(populate_by_name=True)
 
 
-class BatchSendEmailResult(BaseModel):
-    total: int
-    successful: int
-    failed: int
-    items: list[SendEmailResponse]
+class BatchSendEmailItemSuccess(BaseModel):
+    ok: Literal[True]
+    data: SendEmailResponse
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BatchSendEmailItemFailure(BaseModel):
+    ok: Literal[False]
+    error: str
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+BatchSendEmailResult = Annotated[
+    BatchSendEmailItemSuccess | BatchSendEmailItemFailure,
+    Field(discriminator="ok"),
+]
 
 
 class EmailDetail(BaseModel):

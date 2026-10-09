@@ -3,6 +3,8 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
+from pydantic import TypeAdapter
+
 from coffeemail.core.errors import ValidationError
 from coffeemail.core.http import AsyncHttpTransport, HttpTransport
 from coffeemail.core.types import CoffeeMailResponse
@@ -72,31 +74,41 @@ def _normalize_participants(
     return None
 
 
+def _attachment_fields(
+    attachment: EmailAttachment | dict[str, object],
+) -> tuple[str, object, str, str, str | None]:
+    if isinstance(attachment, dict):
+        return (
+            str(attachment["filename"]),
+            attachment["content"],
+            str(attachment.get("contentType", "application/octet-stream")),
+            str(attachment.get("disposition", "attachment")),
+            str(attachment.get("cid")) if attachment.get("cid") else None,
+        )
+    return (
+        attachment.filename,
+        attachment.content,
+        attachment.content_type or "application/octet-stream",
+        attachment.disposition or "attachment",
+        attachment.cid,
+    )
+
+
+def _encode_attachment_content(raw_content: object) -> str:
+    if isinstance(raw_content, bytes):
+        return base64.b64encode(raw_content).decode("ascii")
+    if not isinstance(raw_content, str):
+        return str(raw_content)
+    if Path(raw_content).is_file():
+        return base64.b64encode(Path(raw_content).read_bytes()).decode("ascii")
+    return raw_content
+
+
 def _serialize_attachment(
     attachment: EmailAttachment | dict[str, object],
 ) -> dict[str, object]:
-    if isinstance(attachment, dict):
-        filename = str(attachment["filename"])
-        raw_content = attachment["content"]
-        content_type = str(attachment.get("contentType", "application/octet-stream"))
-        disposition = str(attachment.get("disposition", "attachment"))
-        cid = str(attachment.get("cid")) if attachment.get("cid") else None
-    else:
-        filename = attachment.filename
-        raw_content = attachment.content
-        content_type = attachment.content_type or "application/octet-stream"
-        disposition = attachment.disposition or "attachment"
-        cid = attachment.cid
-
-    if isinstance(raw_content, bytes):
-        content = base64.b64encode(raw_content).decode("ascii")
-    elif isinstance(raw_content, str):
-        if Path(raw_content).is_file():
-            content = base64.b64encode(Path(raw_content).read_bytes()).decode("ascii")
-        else:
-            content = raw_content
-    else:
-        content = str(raw_content)
+    filename, raw_content, content_type, disposition, cid = _attachment_fields(attachment)
+    content = _encode_attachment_content(raw_content)
 
     res: dict[str, object] = {
         "filename": filename,
@@ -123,20 +135,25 @@ def _build_send_payload(payload: SendEmailPayload | dict[str, object]) -> dict[s
 
     to_val = data.get("to")
     if to_val:
-        normalized_to = _normalize_participants(to_val)  # type: ignore
-        data["to"] = (
-            normalized_to[0] if normalized_to and len(normalized_to) == 1 else normalized_to
-        )
+        data["to"] = _normalize_participants(to_val)  # type: ignore
 
-    for key in ("cc", "bcc", "replyTo", "reply_to"):
+    for key in ("cc", "bcc"):
         if data.get(key):
-            target = "replyTo" if "reply" in key else key
-            data[target] = _normalize_participants(data.pop(key))  # type: ignore
+            data[key] = _normalize_participants(data.pop(key))  # type: ignore
+
+    for key in ("replyTo", "reply_to"):
+        if data.get(key):
+            data["replyTo"] = _normalize_participant(data.pop(key))  # type: ignore
 
     if data.get("attachments"):
         data["attachments"] = [_serialize_attachment(a) for a in data["attachments"]]  # type: ignore
 
     return data
+
+
+_BATCH_RESULTS_ADAPTER: TypeAdapter[list[BatchSendEmailResult]] = TypeAdapter(
+    list[BatchSendEmailResult]
+)
 
 
 class Emails:
@@ -156,13 +173,13 @@ class Emails:
 
     def send_batch(
         self, emails: list[SendEmailPayload | dict[str, object]]
-    ) -> CoffeeMailResponse[BatchSendEmailResult]:
-        body = {"items": [_build_send_payload(e) for e in emails]}
-        res = self._transport.request("POST", "/v1/product/emails/batch", json_data=body)
+    ) -> CoffeeMailResponse[list[BatchSendEmailResult]]:
+        body: list[object] = [_build_send_payload(e) for e in emails]
+        res = self._transport.request_list("POST", "/v1/product/emails/batch", json_data=body)
         if res.error or res.data is None:
             return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
         return CoffeeMailResponse(
-            data=BatchSendEmailResult.model_validate(res.data),
+            data=_BATCH_RESULTS_ADAPTER.validate_python(res.data),
             error=None,
             status_code=res.status_code,
         )
@@ -201,6 +218,15 @@ class Emails:
     def cancel(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return self._transport.request("POST", f"/v1/product/emails/{email_id}/cancel")
 
+    def get_events(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("GET", f"/v1/product/emails/{email_id}/events")
+
+    def get_tags(self) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("GET", "/v1/product/emails/tags")
+
+    def resend(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("POST", f"/v1/product/emails/{email_id}/resend")
+
 
 class AsyncEmails:
     def __init__(self, transport: AsyncHttpTransport) -> None:
@@ -219,13 +245,13 @@ class AsyncEmails:
 
     async def send_batch(
         self, emails: list[SendEmailPayload | dict[str, object]]
-    ) -> CoffeeMailResponse[BatchSendEmailResult]:
-        body = {"items": [_build_send_payload(e) for e in emails]}
-        res = await self._transport.request("POST", "/v1/product/emails/batch", json_data=body)
+    ) -> CoffeeMailResponse[list[BatchSendEmailResult]]:
+        body: list[object] = [_build_send_payload(e) for e in emails]
+        res = await self._transport.request_list("POST", "/v1/product/emails/batch", json_data=body)
         if res.error or res.data is None:
             return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
         return CoffeeMailResponse(
-            data=BatchSendEmailResult.model_validate(res.data),
+            data=_BATCH_RESULTS_ADAPTER.validate_python(res.data),
             error=None,
             status_code=res.status_code,
         )
@@ -263,3 +289,12 @@ class AsyncEmails:
 
     async def cancel(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return await self._transport.request("POST", f"/v1/product/emails/{email_id}/cancel")
+
+    async def get_events(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request("GET", f"/v1/product/emails/{email_id}/events")
+
+    async def get_tags(self) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request("GET", "/v1/product/emails/tags")
+
+    async def resend(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request("POST", f"/v1/product/emails/{email_id}/resend")

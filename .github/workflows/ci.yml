@@ -8,8 +8,13 @@ on:
 
 jobs:
   validate:
-    name: Validate (lint + typecheck + test + build)
+    name: Validate (lint + typecheck + version + test + build)
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
 
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +26,7 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.10
+        run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: uv sync --extra dev
@@ -34,6 +39,9 @@ jobs:
 
       - name: Typecheck with Mypy
         run: uv run mypy src tests
+
+      - name: Version sync (pyproject x constantes publicadas)
+        run: uv run python scripts/check_version_sync.py
 
       - name: Run Tests
         run: uv run pytest -v
