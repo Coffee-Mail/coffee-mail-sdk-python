@@ -6,8 +6,6 @@ import re
 import sys
 from pathlib import Path
 
-import tomllib
-
 ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
 INIT = ROOT / "src" / "coffeemail" / "__init__.py"
@@ -19,9 +17,15 @@ VERSION_PATTERNS = {
 }
 
 
+PYPROJECT_VERSION = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+
+
 def read_declared_version() -> str:
-    with PYPROJECT.open("rb") as handle:
-        return str(tomllib.load(handle)["project"]["version"])
+    """Le a versao sem tomllib, que so existe a partir do Python 3.11."""
+    match = PYPROJECT_VERSION.search(PYPROJECT.read_text(encoding="utf-8"))
+    if match is None:
+        raise SystemExit("[check-version-sync] versao nao encontrada em pyproject.toml")
+    return match.group(1)
 
 
 def read_constant(path: Path) -> str | None:
