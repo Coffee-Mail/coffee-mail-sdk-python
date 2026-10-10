@@ -40,6 +40,60 @@ def test_build_send_payload_from_model() -> None:
     )
     wire = _build_send_payload(payload)
     assert wire["from"] == {"email": "contato@empresa.com"}
-    assert wire["to"] == {"email": "cliente@empresa.com"}
+    assert wire["to"] == [{"email": "cliente@empresa.com"}]
     assert wire["subject"] == "Boas-vindas!"
     assert wire["html"] == "<h1>Olá</h1>"
+
+
+def test_to_is_always_a_list_even_for_a_single_recipient() -> None:
+    wire = _build_send_payload(
+        {
+            "from": "contato@empresa.com",
+            "to": "cliente@empresa.com",
+            "subject": "x",
+            "html": "<p>x</p>",
+        }
+    )
+    assert isinstance(wire["to"], list)
+
+
+def test_reply_to_is_a_single_object_not_a_list() -> None:
+    wire = _build_send_payload(
+        {
+            "from": "contato@empresa.com",
+            "to": ["cliente@empresa.com"],
+            "replyTo": "suporte@empresa.com",
+            "subject": "x",
+            "html": "<p>x</p>",
+        }
+    )
+    assert wire["replyTo"] == {"email": "suporte@empresa.com"}
+
+
+def test_error_envelope_is_unwrapped_from_the_nested_error_object() -> None:
+    from coffeemail.core.errors import ValidationError, create_error_from_response
+
+    error = create_error_from_response(
+        400,
+        {
+            "error": {
+                "message": "Destinatário inválido",
+                "code": "VALIDATION_ERROR",
+                "details": {"field": "to"},
+            }
+        },
+    )
+
+    assert isinstance(error, ValidationError)
+    assert error.message == "Destinatário inválido"
+    assert error.code == "VALIDATION_ERROR"
+    assert error.details == {"field": "to"}
+
+
+def test_error_envelope_still_reads_a_flat_body() -> None:
+    from coffeemail.core.errors import NotFoundError, create_error_from_response
+
+    error = create_error_from_response(404, {"message": "não encontrado", "code": "NOT_FOUND"})
+
+    assert isinstance(error, NotFoundError)
+    assert error.message == "não encontrado"

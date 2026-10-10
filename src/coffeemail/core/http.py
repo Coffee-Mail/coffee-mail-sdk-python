@@ -12,7 +12,7 @@ from coffeemail.core.errors import (
 from coffeemail.core.i18n import Locale, get_message
 from coffeemail.core.types import ApiKeyIntrospection, CoffeeMailResponse
 
-SDK_VERSION = "0.1.0"
+SDK_VERSION = "0.1.1"
 DEFAULT_BASE_URL = "https://api.coffeemail.com.br"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
@@ -63,6 +63,24 @@ class HttpTransport(BaseTransport):
         self._cached_introspection: ApiKeyIntrospection | None = None
         self._introspection_expires_at: float = 0.0
 
+    def request_list(
+        self,
+        method: str,
+        path: str,
+        json_data: list[object] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> CoffeeMailResponse[list[object]]:
+        """Variante para endpoints cujo corpo e/ou resposta sao arrays.
+
+        O `request` padrao descarta qualquer payload que nao seja objeto, o que
+        zerava silenciosamente a resposta 202 do envio em lote.
+        """
+        raw = self._request_raw(method, path, json_data=json_data, headers=headers)
+        if raw.error is not None:
+            return CoffeeMailResponse(data=None, error=raw.error, status_code=raw.status_code)
+        payload = raw.data if isinstance(raw.data, list) else []
+        return CoffeeMailResponse(data=payload, error=None, status_code=raw.status_code)
+
     def request(
         self,
         method: str,
@@ -71,6 +89,20 @@ class HttpTransport(BaseTransport):
         json_data: Mapping[str, object] | None = None,
         headers: dict[str, str] | None = None,
     ) -> CoffeeMailResponse[dict[str, object]]:
+        raw = self._request_raw(method, path, params=params, json_data=json_data, headers=headers)
+        if raw.error is not None:
+            return CoffeeMailResponse(data=None, error=raw.error, status_code=raw.status_code)
+        payload = raw.data if isinstance(raw.data, dict) else {}
+        return CoffeeMailResponse(data=payload, error=None, status_code=raw.status_code)
+
+    def _request_raw(
+        self,
+        method: str,
+        path: str,
+        params: Mapping[str, object] | None = None,
+        json_data: Mapping[str, object] | list[object] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> CoffeeMailResponse[object]:
         url = f"{self.base_url}/{path.lstrip('/')}"
         req_headers = self.get_headers(headers)
         clean_params = (
@@ -107,12 +139,10 @@ class HttpTransport(BaseTransport):
             error = create_error_from_response(response.status_code, body)
             return CoffeeMailResponse(data=None, error=error, status_code=response.status_code)
 
-        data: dict[str, object] = {}
+        data: object = {}
         if response.content:
             try:
-                parsed_data = response.json()
-                if isinstance(parsed_data, dict):
-                    data = parsed_data
+                data = response.json()
             except Exception:
                 data = {}
 
@@ -159,6 +189,19 @@ class AsyncHttpTransport(BaseTransport):
         self._cached_introspection: ApiKeyIntrospection | None = None
         self._introspection_expires_at: float = 0.0
 
+    async def request_list(
+        self,
+        method: str,
+        path: str,
+        json_data: list[object] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> CoffeeMailResponse[list[object]]:
+        raw = await self._request_raw(method, path, json_data=json_data, headers=headers)
+        if raw.error is not None:
+            return CoffeeMailResponse(data=None, error=raw.error, status_code=raw.status_code)
+        payload = raw.data if isinstance(raw.data, list) else []
+        return CoffeeMailResponse(data=payload, error=None, status_code=raw.status_code)
+
     async def request(
         self,
         method: str,
@@ -167,6 +210,22 @@ class AsyncHttpTransport(BaseTransport):
         json_data: Mapping[str, object] | None = None,
         headers: dict[str, str] | None = None,
     ) -> CoffeeMailResponse[dict[str, object]]:
+        raw = await self._request_raw(
+            method, path, params=params, json_data=json_data, headers=headers
+        )
+        if raw.error is not None:
+            return CoffeeMailResponse(data=None, error=raw.error, status_code=raw.status_code)
+        payload = raw.data if isinstance(raw.data, dict) else {}
+        return CoffeeMailResponse(data=payload, error=None, status_code=raw.status_code)
+
+    async def _request_raw(
+        self,
+        method: str,
+        path: str,
+        params: Mapping[str, object] | None = None,
+        json_data: Mapping[str, object] | list[object] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> CoffeeMailResponse[object]:
         url = f"{self.base_url}/{path.lstrip('/')}"
         req_headers = self.get_headers(headers)
         clean_params = (
@@ -203,12 +262,10 @@ class AsyncHttpTransport(BaseTransport):
             error = create_error_from_response(response.status_code, body)
             return CoffeeMailResponse(data=None, error=error, status_code=response.status_code)
 
-        data: dict[str, object] = {}
+        data: object = {}
         if response.content:
             try:
-                parsed_data = response.json()
-                if isinstance(parsed_data, dict):
-                    data = parsed_data
+                data = response.json()
             except Exception:
                 data = {}
 

@@ -84,6 +84,13 @@ class Contacts:
             "DELETE", f"/v1/product/audiences/{audience_id}/contacts/{contact_id}"
         )
 
+    def update(
+        self, audience_id: str, contact_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "PUT", f"/v1/product/audiences/{audience_id}/contacts/{contact_id}", json_data=payload
+        )
+
 
 class Audiences:
     def __init__(self, transport: HttpTransport) -> None:
@@ -156,6 +163,20 @@ class Audiences:
         self, audience_id: str, contacts: builtins.list[dict[str, object]]
     ) -> CoffeeMailResponse[BulkAddContactsResponse]:
         return self.contacts.bulk_add(audience_id, contacts)
+
+    def update(
+        self, audience_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "PUT", f"/v1/product/audiences/{audience_id}", json_data=payload
+        )
+
+    def update_contact(
+        self, audience_id: str, contact_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "PUT", f"/v1/product/audiences/{audience_id}/contacts/{contact_id}", json_data=payload
+        )
 
 
 class AsyncContacts:
@@ -233,6 +254,13 @@ class AsyncContacts:
             "DELETE", f"/v1/product/audiences/{audience_id}/contacts/{contact_id}"
         )
 
+    async def update(
+        self, audience_id: str, contact_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "PUT", f"/v1/product/audiences/{audience_id}/contacts/{contact_id}", json_data=payload
+        )
+
 
 class AsyncAudiences:
     def __init__(self, transport: AsyncHttpTransport) -> None:
@@ -305,3 +333,17 @@ class AsyncAudiences:
         self, audience_id: str, contacts: builtins.list[dict[str, object]]
     ) -> CoffeeMailResponse[BulkAddContactsResponse]:
         return await self.contacts.bulk_add(audience_id, contacts)
+
+    async def update(
+        self, audience_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "PUT", f"/v1/product/audiences/{audience_id}", json_data=payload
+        )
+
+    async def update_contact(
+        self, audience_id: str, contact_id: str, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "PUT", f"/v1/product/audiences/{audience_id}/contacts/{contact_id}", json_data=payload
+        )
