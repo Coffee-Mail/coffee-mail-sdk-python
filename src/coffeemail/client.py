@@ -9,6 +9,7 @@ from coffeemail.resources.audiences import Audiences
 from coffeemail.resources.broadcasts import Broadcasts
 from coffeemail.resources.domains import Domains
 from coffeemail.resources.emails import Emails
+from coffeemail.resources.senders import Senders
 from coffeemail.resources.stats import Stats
 from coffeemail.resources.suppressions import Suppressions
 from coffeemail.resources.templates import Templates
@@ -39,6 +40,7 @@ class CoffeeMail:
         self.templates = Templates(self._transport)
         self.audiences = Audiences(self._transport)
         self.broadcasts = Broadcasts(self._transport)
+        self.senders = Senders(self._transport)
         self.suppressions = Suppressions(self._transport)
         self.webhooks = Webhooks(self._transport)
         self.stats = Stats(self._transport)

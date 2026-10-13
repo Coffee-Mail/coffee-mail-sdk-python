@@ -96,3 +96,65 @@ def test_webhooks_list_usa_o_caminho_do_produto() -> None:
 
     assert transport.calls[0]["method"] == "GET"
     assert transport.calls[0]["path"].startswith("/v1/product/webhooks")
+
+
+class FakeListTransport(FakeTransport):
+    """Transporte que tambem responde ao caminho de array (request_list)."""
+
+    def request_list(
+        self,
+        method: str,
+        path: str,
+        json_data: Any = None,
+    ) -> CoffeeMailResponse[Any]:
+        self.calls.append({"method": method, "path": path, "json_data": json_data})
+        return CoffeeMailResponse(data=self.payload, error=self.error, status_code=self.status_code)
+
+
+def test_send_batch_envia_array_puro_e_le_array_de_volta() -> None:
+    from coffeemail.resources.emails import Emails
+
+    transport = FakeListTransport(
+        payload=[
+            {"ok": True, "data": {"id": "em_1", "status": "queued", "queuedAt": "2026-10-09"}},
+            {"ok": False, "error": "destinatário suprimido"},
+        ],
+        status_code=202,
+    )
+    emails = Emails(transport)  # type: ignore[arg-type]
+
+    result = emails.send_batch(
+        [
+            {"from": "a@x.com", "to": "b@x.com", "subject": "s", "html": "<p>h</p>"},
+            {"from": "a@x.com", "to": "c@x.com", "subject": "s", "html": "<p>h</p>"},
+        ]
+    )
+
+    enviado = transport.calls[0]["json_data"]
+    assert isinstance(enviado, list), "a spec exige array puro, nao {'items': [...]}"
+    assert len(enviado) == 2
+
+    assert result.error is None
+    assert result.data is not None
+    assert len(result.data) == 2
+    assert result.data[0].ok is True
+    assert result.data[1].ok is False
+
+
+def test_send_batch_preserva_queued_at_do_envelope() -> None:
+    from coffeemail.resources.emails import Emails
+
+    transport = FakeListTransport(
+        payload=[
+            {"ok": True, "data": {"id": "em_1", "status": "queued", "queuedAt": "2026-10-09"}}
+        ],
+        status_code=202,
+    )
+    emails = Emails(transport)  # type: ignore[arg-type]
+
+    result = emails.send_batch([{"from": "a@x.com", "to": "b@x.com", "subject": "s", "html": "h"}])
+
+    assert result.data is not None
+    item = result.data[0]
+    assert item.ok is True
+    assert item.data.queued_at == "2026-10-09"

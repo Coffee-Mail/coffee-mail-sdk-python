@@ -50,12 +50,24 @@ class NetworkError(CoffeeMailError):
     pass
 
 
+def _unwrap_error_envelope(body: dict[str, object]) -> dict[str, object]:
+    """Resolve o envelope de erro da API, que aninha os campos sob "error".
+
+    A API responde {"error": {"message", "code", "details"}}. Ler o nivel raiz
+    degradava toda mensagem para "HTTP Error <status>" e zerava o code.
+    """
+    nested = body.get("error")
+    if isinstance(nested, dict):
+        return nested
+    return body
+
+
 def create_error_from_response(
     status_code: int,
     body: dict[str, object] | None = None,
     default_message: str | None = None,
 ) -> CoffeeMailError:
-    data = body or {}
+    data = _unwrap_error_envelope(body or {})
     message = str(
         data.get("message") or data.get("error") or default_message or f"HTTP Error {status_code}"
     )

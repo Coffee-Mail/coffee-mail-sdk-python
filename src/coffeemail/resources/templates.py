@@ -131,6 +131,14 @@ class Templates:
             "POST", f"/v1/product/templates/{template_id}/test-send", json_data=body
         )
 
+    def format(self, payload: dict[str, object]) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("POST", "/v1/product/templates/format", json_data=payload)
+
+    def test_render(self, payload: dict[str, object]) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "POST", "/v1/product/templates/test-render", json_data=payload
+        )
+
 
 class AsyncTemplates:
     def __init__(self, transport: AsyncHttpTransport) -> None:
@@ -254,4 +262,16 @@ class AsyncTemplates:
             body["variables"] = variables
         return await self._transport.request(
             "POST", f"/v1/product/templates/{template_id}/test-send", json_data=body
+        )
+
+    async def format(self, payload: dict[str, object]) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "POST", "/v1/product/templates/format", json_data=payload
+        )
+
+    async def test_render(
+        self, payload: dict[str, object]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "POST", "/v1/product/templates/test-render", json_data=payload
         )

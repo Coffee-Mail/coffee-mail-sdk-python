@@ -94,6 +94,16 @@ class Webhooks:
     def verify_signature(payload: str | bytes, signature: str, secret: str) -> bool:
         return verify_webhook_signature(payload, signature, secret)
 
+    def list_deliveries(self, webhook_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("GET", f"/v1/product/webhooks/{webhook_id}/deliveries")
+
+    def toggle(self, webhook_id: str, enabled: bool) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "PATCH",
+            f"/v1/product/webhooks/{webhook_id}",
+            json_data={"status": "active" if enabled else "paused"},
+        )
+
 
 class AsyncWebhooks:
     def __init__(self, transport: AsyncHttpTransport) -> None:
@@ -180,3 +190,13 @@ class AsyncWebhooks:
     @staticmethod
     def verify_signature(payload: str | bytes, signature: str, secret: str) -> bool:
         return verify_webhook_signature(payload, signature, secret)
+
+    async def list_deliveries(self, webhook_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request("GET", f"/v1/product/webhooks/{webhook_id}/deliveries")
+
+    async def toggle(self, webhook_id: str, enabled: bool) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "PATCH",
+            f"/v1/product/webhooks/{webhook_id}",
+            json_data={"status": "active" if enabled else "paused"},
+        )

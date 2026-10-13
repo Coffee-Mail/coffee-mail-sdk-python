@@ -1,3 +1,5 @@
+import builtins
+
 from coffeemail.core.http import AsyncHttpTransport, HttpTransport
 from coffeemail.core.types import CoffeeMailResponse
 from coffeemail.models.suppressions import (
@@ -57,6 +59,18 @@ class Suppressions:
     def delete(self, email: str) -> CoffeeMailResponse[dict[str, object]]:
         return self._transport.request("DELETE", f"/v1/product/suppressions/{email.strip()}")
 
+    def reactivate(self, suppression_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "POST", f"/v1/product/suppressions/{suppression_id}/reactivate"
+        )
+
+    def bulk_create(
+        self, suppressions: builtins.list[dict[str, object]]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request(
+            "POST", "/v1/product/suppressions/bulk", json_data={"suppressions": suppressions}
+        )
+
 
 class AsyncSuppressions:
     def __init__(self, transport: AsyncHttpTransport) -> None:
@@ -106,3 +120,15 @@ class AsyncSuppressions:
 
     async def delete(self, email: str) -> CoffeeMailResponse[dict[str, object]]:
         return await self._transport.request("DELETE", f"/v1/product/suppressions/{email.strip()}")
+
+    async def reactivate(self, suppression_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "POST", f"/v1/product/suppressions/{suppression_id}/reactivate"
+        )
+
+    async def bulk_create(
+        self, suppressions: builtins.list[dict[str, object]]
+    ) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "POST", "/v1/product/suppressions/bulk", json_data={"suppressions": suppressions}
+        )
