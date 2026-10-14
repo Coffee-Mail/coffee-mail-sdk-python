@@ -13,9 +13,13 @@ from coffeemail.models.broadcasts import (
 from coffeemail.models.domains import (
     CreateDomainResponse,
     DnsRecord,
+    DnsResolution,
     DomainDetail,
+    DomainDnsCheck,
     DomainStatus,
+    DomainStatusReason,
     ListDomainsResponse,
+    SendingIdentity,
 )
 from coffeemail.models.emails import (
     BatchSendEmailResult,
@@ -61,9 +65,13 @@ __all__ = [
     "SendEmailResponse",
     "CreateDomainResponse",
     "DnsRecord",
+    "DnsResolution",
     "DomainDetail",
+    "DomainDnsCheck",
     "DomainStatus",
+    "DomainStatusReason",
     "ListDomainsResponse",
+    "SendingIdentity",
     "ListTemplatesResponse",
     "PreviewTemplateResponse",
     "TemplateDetail",

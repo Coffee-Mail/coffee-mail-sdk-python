@@ -2,6 +2,7 @@ from typing import Any
 
 from coffeemail.core.errors import NotFoundError
 from coffeemail.core.types import CoffeeMailResponse
+from coffeemail.resources.domains import Domains
 from coffeemail.resources.suppressions import Suppressions
 from coffeemail.resources.webhooks import Webhooks
 
@@ -158,3 +159,93 @@ def test_send_batch_preserva_queued_at_do_envelope() -> None:
     item = result.data[0]
     assert item.ok is True
     assert item.data.queued_at == "2026-10-09"
+
+
+def _dns_check(ok: bool, resolution: str) -> dict[str, Any]:
+    return {
+        "ok": ok,
+        "resolution": resolution,
+        "expected": "v=spf1 include:coffeemail.com.br ~all",
+        "got": None,
+        "matches": [],
+    }
+
+
+def test_domains_verify_repassa_status_reason_identidade_e_resolution() -> None:
+    transport = FakeTransport(
+        payload={
+            "id": "dom_123",
+            "name": "empresa.com.br",
+            "status": "pending",
+            "statusReason": "provider_pending",
+            "sendingIdentity": {
+                "provider": "aws_ses",
+                "state": "pending",
+                "lastSyncedAt": "2026-10-14T12:00:00.000Z",
+            },
+            "verifiedAt": None,
+            "createdAt": "2026-10-01T00:00:00.000Z",
+            "checks": {
+                "spf": _dns_check(True, "found"),
+                "dkim": _dns_check(True, "found"),
+                "dmarc": _dns_check(True, "found"),
+                "ownership": _dns_check(False, "unknown"),
+                "infrastructureSpf": _dns_check(False, "absent"),
+            },
+            "requiredChecks": ["spf", "dkim", "dmarc", "ownership"],
+        }
+    )
+
+    res = Domains(transport).verify("dom_123")  # type: ignore[arg-type]
+
+    assert res.data is not None
+    assert res.data.status == "pending"
+    assert res.data.status_reason == "provider_pending"
+    assert res.data.sending_identity is not None
+    assert res.data.sending_identity.provider == "aws_ses"
+    assert res.data.sending_identity.state == "pending"
+    assert res.data.sending_identity.last_synced_at == "2026-10-14T12:00:00.000Z"
+    assert res.data.checks is not None
+    assert res.data.checks["spf"].resolution == "found"
+    assert res.data.checks["ownership"].resolution == "unknown"
+    assert res.data.checks["infrastructureSpf"].resolution == "absent"
+
+
+def test_domains_get_aceita_resposta_sem_os_campos_novos() -> None:
+    transport = FakeTransport(
+        payload={
+            "id": "dom_123",
+            "name": "empresa.com.br",
+            "status": "verified",
+            "createdAt": "2026-10-01T00:00:00.000Z",
+            "campoDesconhecido": "ignorado",
+        }
+    )
+
+    res = Domains(transport).get("dom_123")  # type: ignore[arg-type]
+
+    assert res.data is not None
+    assert res.data.status_reason is None
+    assert res.data.sending_identity is None
+    assert res.data.checks is None
+
+
+def test_domains_list_repassa_status_reason() -> None:
+    transport = FakeTransport(
+        payload={
+            "domains": [
+                {
+                    "id": "dom_123",
+                    "name": "empresa.com.br",
+                    "status": "failed",
+                    "statusReason": "dns_records_missing",
+                    "createdAt": "2026-10-01T00:00:00.000Z",
+                }
+            ]
+        }
+    )
+
+    res = Domains(transport).list()  # type: ignore[arg-type]
+
+    assert res.data is not None
+    assert res.data.domains[0].status_reason == "dns_records_missing"
