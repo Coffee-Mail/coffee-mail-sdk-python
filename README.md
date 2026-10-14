@@ -73,13 +73,14 @@ A versão no PyPI é a **0.1.1** (publicada em 2026-10-08). A `main` continua de
 | `broadcasts.delete` retorna `ValidationError` local, sem chamada de rede | Faz `DELETE /v1/product/broadcasts/{id}`, rota que não existe na API |
 | `DomainDetail` expõe `status_reason`, `sending_identity` e `checks` | Campos ausentes |
 | `__version__` e `User-Agent` reportam `0.1.1` | Reportam `0.1.0` |
+| Parâmetro `base_url` removido: o SDK só fala com `https://api.coffeemail.com.br` | `base_url` existe e aceita qualquer host |
 
 Na tabela de [Referência](#-referência), a coluna **PyPI 0.1.1** indica se o método já está no pacote publicado.
 
 ### Limitações conhecidas
 
 - **Verificação de webhook incompatível com a API.** `verify_signature` calcula `hex(HMAC-SHA256(secret, corpo))`. A API assina `sha256=` + `hex(HMAC-SHA256(secret, "<timestamp>.<idempotencyKey>.<corpo>"))` e envia os cabeçalhos `x-webhook-signature`, `x-webhook-timestamp` e `x-webhook-idempotency-key`. Com entregas reais, o método retorna `False`. Veja [Webhooks](#-webhooks) para a verificação correta.
-- **Payloads fora do contrato da API** (`coffee-mail-api/openapi/product.json`). Os métodos abaixo enviam campos que a API não conhece ou omitem campos obrigatórios:
+- **Payloads fora do contrato da API** (spec OpenAPI da API de produto). Os métodos abaixo enviam campos que a API não conhece ou omitem campos obrigatórios:
 
   | Método | O SDK envia | O contrato espera |
   | --- | --- | --- |
@@ -202,7 +203,6 @@ asyncio.run(main())
 | Parâmetro | Tipo | Default | Descrição |
 | --- | --- | --- | --- |
 | `api_key` | `str \| None` (posicional) | `None` → `COFFEEMAIL_API_KEY` | Chave de API, enviada como `Authorization: Bearer <chave>`. Espaços nas pontas são removidos. Vazia ou ausente lança `AuthenticationError`. |
-| `base_url` | `str \| None` (keyword) | `https://api.coffeemail.com.br` | URL base da API. Barra final é removida. |
 | `timeout` | `float` (keyword) | `10.0` | Timeout em segundos do cliente HTTP criado pelo SDK. Ignorado quando você passa `http_client`. |
 | `locale` | `"pt-BR" \| "en"` (keyword) | `"pt-BR"` | Idioma das mensagens locais do SDK e valor do cabeçalho `Accept-Language`. |
 | `http_client` | `httpx.Client` (síncrono) / `httpx.AsyncClient` (assíncrono) | `None` | Cliente HTTP próprio (proxy, transporte, limites de conexão, mocks). |
@@ -210,6 +210,8 @@ asyncio.run(main())
 | Variável de ambiente | Uso |
 | --- | --- |
 | `COFFEEMAIL_API_KEY` | Chave usada quando `api_key` não é informado. |
+
+O host da API é fixo em `https://api.coffeemail.com.br` e não é configurável. É uma decisão de segurança: a chave de API só trafega para o host oficial. Passar `base_url` lança `TypeError`.
 
 Cabeçalhos enviados em toda requisição: `Authorization`, `Content-Type: application/json`, `Accept: application/json`, `Accept-Language` e `User-Agent: coffeemail-python/<versão>`.
 
@@ -219,7 +221,6 @@ import httpx
 from coffeemail import CoffeeMail
 
 client = CoffeeMail(
-    base_url="https://api.coffeemail.com.br",
     locale="en",
     http_client=httpx.Client(timeout=30.0),
 )
@@ -286,7 +287,7 @@ Todas herdam de `CoffeeMailError` e são exportadas por `coffeemail`. Cada erro 
 
 ## 📚 Referência
 
-Os caminhos abaixo são relativos à `base_url`. Todos os recursos existem nos dois clientes; no `AsyncCoffeeMail` os métodos são `async`, exceto `webhooks.verify_signature` e `invalidate_introspection_cache`. A coluna **PyPI 0.1.1** indica se o método já está no pacote publicado (veja [Status do projeto](#-status-do-projeto)).
+Os caminhos abaixo são relativos a `https://api.coffeemail.com.br`. Todos os recursos existem nos dois clientes; no `AsyncCoffeeMail` os métodos são `async`, exceto `webhooks.verify_signature` e `invalidate_introspection_cache`. A coluna **PyPI 0.1.1** indica se o método já está no pacote publicado (veja [Status do projeto](#-status-do-projeto)).
 
 ### Introspecção
 
@@ -519,7 +520,7 @@ print(f"Entregues: {stats.total_delivered} ({stats.delivery_rate:.1%})")
 
 ### Como a API assina as entregas
 
-Cada entrega é um `POST` com corpo JSON e estes cabeçalhos (`coffee-mail-api/src/modules/webhooks/adapters/delivery/`):
+Cada entrega é um `POST` com corpo JSON e estes cabeçalhos:
 
 | Cabeçalho | Conteúdo |
 | --- | --- |
@@ -640,8 +641,6 @@ Vulnerabilidades: não abra issue pública; siga o [SECURITY.md](https://github.
 
 | Repositório | Papel |
 | --- | --- |
-| [coffee-mail-api](https://github.com/Coffee-Mail/coffee-mail-api) | Backend: API HTTP, filas, worker de envio, billing |
-| [coffee-mail-web](https://github.com/Coffee-Mail/coffee-mail-web) | Landing, documentação pública e dashboard |
 | [coffee-mail-sdk-node](https://github.com/Coffee-Mail/coffee-mail-sdk-node) | SDK oficial Node.js/TypeScript (`@coffeemail/node`) |
 | **coffee-mail-sdk-python** (você está aqui) | SDK oficial Python (`coffeemail`) |
 | [coffee-mail-sdk-php](https://github.com/Coffee-Mail/coffee-mail-sdk-php) | SDK oficial PHP (`coffeemail/coffeemail-php`) |

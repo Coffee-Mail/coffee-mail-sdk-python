@@ -1,3 +1,6 @@
+import inspect
+
+import httpx
 import pytest
 
 from coffeemail import AsyncCoffeeMail, CoffeeMail
@@ -29,6 +32,26 @@ def test_client_init_with_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_client_init_with_explicit_key() -> None:
     client = CoffeeMail("cm_live_direct_key")
     assert client._transport.api_key == "cm_live_direct_key"
+
+
+@pytest.mark.parametrize("client_class", [CoffeeMail, AsyncCoffeeMail])
+def test_clients_do_not_accept_a_custom_api_host(client_class: type[object]) -> None:
+    assert "base_url" not in inspect.signature(client_class).parameters
+
+
+def test_requests_always_target_the_official_api_host() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    client = CoffeeMail(
+        "cm_live_direct_key", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    client.emails.get_tags()
+
+    assert str(captured[0].url).startswith("https://api.coffeemail.com.br/")
 
 
 def test_response_envelope_unpacking() -> None:

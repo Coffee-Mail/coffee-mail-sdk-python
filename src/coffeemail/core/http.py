@@ -23,7 +23,6 @@ class BaseTransport:
     def __init__(
         self,
         api_key: str | None = None,
-        base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         locale: Locale = "pt-BR",
     ) -> None:
@@ -32,7 +31,6 @@ class BaseTransport:
             raise AuthenticationError(get_message("missing_api_key", locale))
 
         self.api_key = clean_key
-        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
         self.locale = locale
 
@@ -53,12 +51,11 @@ class HttpTransport(BaseTransport):
     def __init__(
         self,
         api_key: str | None = None,
-        base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         locale: Locale = "pt-BR",
         client: httpx.Client | None = None,
     ) -> None:
-        super().__init__(api_key, base_url, timeout, locale)
+        super().__init__(api_key, timeout, locale)
         self.client = client or httpx.Client(timeout=self.timeout)
         self._cached_introspection: ApiKeyIntrospection | None = None
         self._introspection_expires_at: float = 0.0
@@ -103,7 +100,7 @@ class HttpTransport(BaseTransport):
         json_data: Mapping[str, object] | list[object] | None = None,
         headers: dict[str, str] | None = None,
     ) -> CoffeeMailResponse[object]:
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        url = f"{DEFAULT_BASE_URL}/{path.lstrip('/')}"
         req_headers = self.get_headers(headers)
         clean_params = (
             {k: str(v) for k, v in params.items() if v is not None} if params is not None else None
@@ -179,12 +176,11 @@ class AsyncHttpTransport(BaseTransport):
     def __init__(
         self,
         api_key: str | None = None,
-        base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         locale: Locale = "pt-BR",
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        super().__init__(api_key, base_url, timeout, locale)
+        super().__init__(api_key, timeout, locale)
         self.client = client or httpx.AsyncClient(timeout=self.timeout)
         self._cached_introspection: ApiKeyIntrospection | None = None
         self._introspection_expires_at: float = 0.0
@@ -226,7 +222,7 @@ class AsyncHttpTransport(BaseTransport):
         json_data: Mapping[str, object] | list[object] | None = None,
         headers: dict[str, str] | None = None,
     ) -> CoffeeMailResponse[object]:
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        url = f"{DEFAULT_BASE_URL}/{path.lstrip('/')}"
         req_headers = self.get_headers(headers)
         clean_params = (
             {k: str(v) for k, v in params.items() if v is not None} if params is not None else None

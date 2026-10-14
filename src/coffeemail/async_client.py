@@ -21,7 +21,6 @@ class AsyncCoffeeMail:
         self,
         api_key: str | None = None,
         *,
-        base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         locale: Locale = "pt-BR",
         http_client: httpx.AsyncClient | None = None,
@@ -29,7 +28,6 @@ class AsyncCoffeeMail:
         resolved_key = api_key or os.getenv("COFFEEMAIL_API_KEY")
         self._transport = AsyncHttpTransport(
             api_key=resolved_key,
-            base_url=base_url,
             timeout=timeout,
             locale=locale,
             client=http_client,
