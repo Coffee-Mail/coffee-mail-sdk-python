@@ -13,7 +13,11 @@ class SenderDetail(BaseModel):
 
 
 class CreatedSender(SenderDetail):
-    verification_token: str = Field(alias="verificationToken")
+    """Remetente recém-criado. O token de verificação segue por e-mail ao
+    endereço cadastrado; ``verification_token`` é mantido por compatibilidade
+    e está depreciado (a API não o devolve mais)."""
+
+    verification_token: str | None = Field(default=None, alias="verificationToken")
 
 
 class ListSendersResponse(BaseModel):

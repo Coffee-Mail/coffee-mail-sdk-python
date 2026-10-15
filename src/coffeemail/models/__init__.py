@@ -10,6 +10,7 @@ from coffeemail.models.audiences import (
 )
 from coffeemail.models.broadcasts import (
     BroadcastDetail,
+    BroadcastMetrics,
     BroadcastStatus,
     CancelBroadcastResult,
     ListBroadcastsResponse,
@@ -106,6 +107,7 @@ __all__ = [
     "AudienceDetail",
     "BatchSendEmailResult",
     "BroadcastDetail",
+    "BroadcastMetrics",
     "BroadcastStatus",
     "BulkAddContactsResponse",
     "BulkContactError",

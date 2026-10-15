@@ -34,6 +34,9 @@ class Senders:
         res = self._transport.request("POST", f"{SENDERS_PATH}/verify", json_data={"token": token})
         return parse_model(res, VerifySenderResult, self._transport.locale)
 
+    def resend_verification(self, sender_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return self._transport.request("POST", f"{SENDERS_PATH}/{sender_id}/resend-verification")
+
     def delete(self, sender_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return self._transport.request("DELETE", f"{SENDERS_PATH}/{sender_id}")
 
@@ -59,6 +62,11 @@ class AsyncSenders:
             "POST", f"{SENDERS_PATH}/verify", json_data={"token": token}
         )
         return parse_model(res, VerifySenderResult, self._transport.locale)
+
+    async def resend_verification(self, sender_id: str) -> CoffeeMailResponse[dict[str, object]]:
+        return await self._transport.request(
+            "POST", f"{SENDERS_PATH}/{sender_id}/resend-verification"
+        )
 
     async def delete(self, sender_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return await self._transport.request("DELETE", f"{SENDERS_PATH}/{sender_id}")
