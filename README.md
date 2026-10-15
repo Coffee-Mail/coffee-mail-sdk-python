@@ -507,7 +507,7 @@ async def coffeemail_webhook(request: Request) -> None:
 ## 🔖 Versionamento e releases
 
 - **SemVer.** A versão fica em três lugares que precisam bater: `pyproject.toml`, `__version__` em `src/coffeemail/__init__.py` e `SDK_VERSION` em `src/coffeemail/core/http.py` (usado no `User-Agent`). `scripts/check_version_sync.py` falha a CI se divergirem.
-- **Compatibilidade retroativa.** A partir da 0.2.0, mudanças na superfície pública **adicionam e depreciam; nunca renomeiam nem removem** métodos, parâmetros, modelos ou campos. A 0.2.0 foi a exceção: corrigiu o contrato direto porque o SDK ainda não tinha usuários ativos. Os SDKs oficiais (Node.js, Python, PHP, Java e Go) mantêm o mesmo contrato.
+- **Compatibilidade retroativa.** A partir da 0.2.0, mudanças na superfície pública **adicionam e depreciam; nunca renomeiam nem removem** métodos, parâmetros, modelos ou campos. A 0.2.0 foi a exceção: corrigiu o contrato direto porque o SDK ainda não tinha usuários ativos. Os SDKs oficiais (Node.js, Python, PHP, Java, Go e Ruby) mantêm o mesmo contrato.
 - **Publicação.** O workflow [`publish.yml`](https://github.com/Coffee-Mail/coffee-mail-sdk-python/blob/main/.github/workflows/publish.yml) roda em push na `main` e em tags `v*`: executa ruff, mypy e pytest, consulta o PyPI e só constrói e publica se a versão do `pyproject.toml` ainda não existir lá. Para lançar, suba a versão nos três lugares acima e faça merge na `main`.
 - **CHANGELOG.** As mudanças ficam no [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog); toda mudança de comportamento entra em "Não lançado".
 
@@ -591,6 +591,7 @@ Vulnerabilidades: não abra issue pública; siga o [SECURITY.md](https://github.
 | [coffee-mail-sdk-php](https://github.com/Coffee-Mail/coffee-mail-sdk-php) | SDK oficial PHP (`coffeemail/coffeemail-php`) |
 | [coffee-mail-sdk-java](https://github.com/Coffee-Mail/coffee-mail-sdk-java) | SDK oficial Java (`br.com.coffeemail:coffeemail-java`) |
 | [coffee-mail-sdk-go](https://github.com/Coffee-Mail/coffee-mail-sdk-go) | SDK oficial Go (`github.com/Coffee-Mail/coffee-mail-sdk-go`) |
+| [coffee-mail-sdk-ruby](https://github.com/Coffee-Mail/coffee-mail-sdk-ruby) | SDK oficial Ruby (`coffeemail`) |
 | [coffee-mail-laravel](https://github.com/Coffee-Mail/coffee-mail-laravel) | Integração Laravel (mail driver + facade), `coffeemail/coffeemail-laravel` |
 | [coffee-mail-sdk-workbench](https://github.com/Coffee-Mail/coffee-mail-sdk-workbench) | Bancada de validação dos SDKs por spec |
 
