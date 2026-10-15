@@ -1,13 +1,66 @@
-from coffeemail.core.errors import ValidationError
+from collections.abc import Mapping
+
 from coffeemail.core.http import AsyncHttpTransport, HttpTransport
 from coffeemail.core.types import CoffeeMailResponse
 from coffeemail.models.broadcasts import (
     BroadcastDetail,
+    BroadcastStatus,
+    CancelBroadcastResult,
     ListBroadcastsResponse,
+    SendBroadcastResult,
+    TestSendResult,
 )
+from coffeemail.resources._common import compact, parse_model
+
+BROADCASTS_PATH = "/v1/product/broadcasts"
+OP_CREATE = "broadcasts.create"
+OP_LIST = "broadcasts.list"
+OP_GET = "broadcasts.get"
+OP_SEND = "broadcasts.send"
+OP_TEST_SEND = "broadcasts.testSend"
+OP_CANCEL = "broadcasts.cancel"
+
+
+def _list_params(
+    limit: int | None,
+    after: str | None,
+    status: BroadcastStatus | None,
+    from_date: str | None,
+    to_date: str | None,
+) -> dict[str, object]:
+    return compact(limit=limit, after=after, status=status, **{"from": from_date, "to": to_date})
+
+
+def _create_body(
+    audience_id: str,
+    from_email: str,
+    subject: str | None,
+    template_id: str | None,
+    html: str | None,
+    text: str | None,
+    reply_to: str | None,
+    variables: Mapping[str, object] | None,
+) -> dict[str, object]:
+    return compact(
+        audienceId=audience_id,
+        fromEmail=from_email.strip(),
+        subject=subject,
+        templateId=template_id,
+        html=html,
+        text=text,
+        replyTo=reply_to,
+        variables=dict(variables) if variables is not None else None,
+    )
+
+
+def _test_send_body(to: str, variables: Mapping[str, object] | None) -> dict[str, object]:
+    return compact(to=to.strip(), variables=dict(variables) if variables is not None else None)
 
 
 class Broadcasts:
+    """Campanhas. Toda operação exige chave ``full_access``; sem ela o erro é
+    ``PermissionDeniedError`` (código ``PERMISSION_DENIED``)."""
+
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
@@ -15,91 +68,70 @@ class Broadcasts:
         self,
         limit: int | None = None,
         after: str | None = None,
+        *,
+        status: BroadcastStatus | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> CoffeeMailResponse[ListBroadcastsResponse]:
-        params: dict[str, object] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if after is not None:
-            params["after"] = after
-
-        res = self._transport.request("GET", "/v1/product/broadcasts", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=ListBroadcastsResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
+        params = _list_params(limit, after, status, from_date, to_date)
+        res = self._transport.request(
+            "GET", BROADCASTS_PATH, params=params, permission_operation=OP_LIST
         )
+        return parse_model(res, ListBroadcastsResponse, self._transport.locale)
 
     def get(self, broadcast_id: str) -> CoffeeMailResponse[BroadcastDetail]:
-        res = self._transport.request("GET", f"/v1/product/broadcasts/{broadcast_id}")
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=BroadcastDetail.model_validate(res.data), error=None, status_code=res.status_code
+        res = self._transport.request(
+            "GET", f"{BROADCASTS_PATH}/{broadcast_id}", permission_operation=OP_GET
         )
+        return parse_model(res, BroadcastDetail, self._transport.locale)
 
     def create(
         self,
-        name: str,
-        subject: str,
+        *,
         audience_id: str,
+        from_email: str,
+        subject: str | None = None,
         template_id: str | None = None,
         html: str | None = None,
         text: str | None = None,
-        scheduled_at: str | None = None,
+        reply_to: str | None = None,
+        variables: Mapping[str, object] | None = None,
     ) -> CoffeeMailResponse[BroadcastDetail]:
-        body: dict[str, object] = {
-            "name": name.strip(),
-            "subject": subject.strip(),
-            "audienceId": audience_id,
-        }
-        if template_id:
-            body["templateId"] = template_id
-        if html:
-            body["html"] = html
-        if text:
-            body["text"] = text
-        if scheduled_at:
-            body["scheduledAt"] = scheduled_at
-
-        res = self._transport.request("POST", "/v1/product/broadcasts", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=BroadcastDetail.model_validate(res.data), error=None, status_code=res.status_code
+        body = _create_body(
+            audience_id, from_email, subject, template_id, html, text, reply_to, variables
         )
-
-    def send(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("POST", f"/v1/product/broadcasts/{broadcast_id}/send")
-
-    def cancel(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("POST", f"/v1/product/broadcasts/{broadcast_id}/cancel")
-
-    def delete(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        """Nao suportado pela API CoffeeMail. Use cancel().
-
-        Mantido para nao quebrar a assinatura publica. Falha de imediato, sem
-        chamada de rede, em vez de devolver um 404 que sugere campanha inexistente.
-        """
-        del broadcast_id
-        return CoffeeMailResponse(
-            data=None,
-            error=ValidationError(
-                "Exclusao de campanha nao e suportada pela API CoffeeMail. Use cancel()."
-            ),
-            status_code=None,
+        res = self._transport.request(
+            "POST", BROADCASTS_PATH, json_data=body, permission_operation=OP_CREATE
         )
+        return parse_model(res, BroadcastDetail, self._transport.locale)
+
+    def send(self, broadcast_id: str) -> CoffeeMailResponse[SendBroadcastResult]:
+        res = self._transport.request(
+            "POST", f"{BROADCASTS_PATH}/{broadcast_id}/send", permission_operation=OP_SEND
+        )
+        return parse_model(res, SendBroadcastResult, self._transport.locale)
+
+    def cancel(self, broadcast_id: str) -> CoffeeMailResponse[CancelBroadcastResult]:
+        res = self._transport.request(
+            "POST", f"{BROADCASTS_PATH}/{broadcast_id}/cancel", permission_operation=OP_CANCEL
+        )
+        return parse_model(res, CancelBroadcastResult, self._transport.locale)
 
     def test_send(
-        self, broadcast_id: str, payload: dict[str, object]
-    ) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request(
-            "POST", f"/v1/product/broadcasts/{broadcast_id}/test-send", json_data=payload
+        self, broadcast_id: str, to: str, variables: Mapping[str, object] | None = None
+    ) -> CoffeeMailResponse[TestSendResult]:
+        res = self._transport.request(
+            "POST",
+            f"{BROADCASTS_PATH}/{broadcast_id}/test-send",
+            json_data=_test_send_body(to, variables),
+            permission_operation=OP_TEST_SEND,
         )
+        return parse_model(res, TestSendResult, self._transport.locale)
 
 
 class AsyncBroadcasts:
+    """Versão assíncrona de :class:`Broadcasts`."""
+
     def __init__(self, transport: AsyncHttpTransport) -> None:
         self._transport = transport
 
@@ -107,87 +139,62 @@ class AsyncBroadcasts:
         self,
         limit: int | None = None,
         after: str | None = None,
+        *,
+        status: BroadcastStatus | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> CoffeeMailResponse[ListBroadcastsResponse]:
-        params: dict[str, object] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if after is not None:
-            params["after"] = after
-
-        res = await self._transport.request("GET", "/v1/product/broadcasts", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=ListBroadcastsResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
+        params = _list_params(limit, after, status, from_date, to_date)
+        res = await self._transport.request(
+            "GET", BROADCASTS_PATH, params=params, permission_operation=OP_LIST
         )
+        return parse_model(res, ListBroadcastsResponse, self._transport.locale)
 
     async def get(self, broadcast_id: str) -> CoffeeMailResponse[BroadcastDetail]:
-        res = await self._transport.request("GET", f"/v1/product/broadcasts/{broadcast_id}")
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=BroadcastDetail.model_validate(res.data), error=None, status_code=res.status_code
+        res = await self._transport.request(
+            "GET", f"{BROADCASTS_PATH}/{broadcast_id}", permission_operation=OP_GET
         )
+        return parse_model(res, BroadcastDetail, self._transport.locale)
 
     async def create(
         self,
-        name: str,
-        subject: str,
+        *,
         audience_id: str,
+        from_email: str,
+        subject: str | None = None,
         template_id: str | None = None,
         html: str | None = None,
         text: str | None = None,
-        scheduled_at: str | None = None,
+        reply_to: str | None = None,
+        variables: Mapping[str, object] | None = None,
     ) -> CoffeeMailResponse[BroadcastDetail]:
-        body: dict[str, object] = {
-            "name": name.strip(),
-            "subject": subject.strip(),
-            "audienceId": audience_id,
-        }
-        if template_id:
-            body["templateId"] = template_id
-        if html:
-            body["html"] = html
-        if text:
-            body["text"] = text
-        if scheduled_at:
-            body["scheduledAt"] = scheduled_at
-
-        res = await self._transport.request("POST", "/v1/product/broadcasts", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=BroadcastDetail.model_validate(res.data), error=None, status_code=res.status_code
+        body = _create_body(
+            audience_id, from_email, subject, template_id, html, text, reply_to, variables
         )
-
-    async def send(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request("POST", f"/v1/product/broadcasts/{broadcast_id}/send")
-
-    async def cancel(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request(
-            "POST", f"/v1/product/broadcasts/{broadcast_id}/cancel"
+        res = await self._transport.request(
+            "POST", BROADCASTS_PATH, json_data=body, permission_operation=OP_CREATE
         )
+        return parse_model(res, BroadcastDetail, self._transport.locale)
 
-    async def delete(self, broadcast_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        """Nao suportado pela API CoffeeMail. Use cancel().
-
-        Mantido para nao quebrar a assinatura publica. Falha de imediato, sem
-        chamada de rede, em vez de devolver um 404 que sugere campanha inexistente.
-        """
-        del broadcast_id
-        return CoffeeMailResponse(
-            data=None,
-            error=ValidationError(
-                "Exclusao de campanha nao e suportada pela API CoffeeMail. Use cancel()."
-            ),
-            status_code=None,
+    async def send(self, broadcast_id: str) -> CoffeeMailResponse[SendBroadcastResult]:
+        res = await self._transport.request(
+            "POST", f"{BROADCASTS_PATH}/{broadcast_id}/send", permission_operation=OP_SEND
         )
+        return parse_model(res, SendBroadcastResult, self._transport.locale)
+
+    async def cancel(self, broadcast_id: str) -> CoffeeMailResponse[CancelBroadcastResult]:
+        res = await self._transport.request(
+            "POST", f"{BROADCASTS_PATH}/{broadcast_id}/cancel", permission_operation=OP_CANCEL
+        )
+        return parse_model(res, CancelBroadcastResult, self._transport.locale)
 
     async def test_send(
-        self, broadcast_id: str, payload: dict[str, object]
-    ) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request(
-            "POST", f"/v1/product/broadcasts/{broadcast_id}/test-send", json_data=payload
+        self, broadcast_id: str, to: str, variables: Mapping[str, object] | None = None
+    ) -> CoffeeMailResponse[TestSendResult]:
+        res = await self._transport.request(
+            "POST",
+            f"{BROADCASTS_PATH}/{broadcast_id}/test-send",
+            json_data=_test_send_body(to, variables),
+            permission_operation=OP_TEST_SEND,
         )
+        return parse_model(res, TestSendResult, self._transport.locale)

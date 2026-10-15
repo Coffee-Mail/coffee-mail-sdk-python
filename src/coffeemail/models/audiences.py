@@ -1,14 +1,26 @@
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class ContactInput(BaseModel):
+    """Contato para criação em lote; aceita ``first_name`` ou ``firstName``."""
+
+    email: str
+    first_name: str | None = Field(default=None, alias="firstName")
+    last_name: str | None = Field(default=None, alias="lastName")
+    metadata: dict[str, object] | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ContactDetail(BaseModel):
     id: str
     email: str
-    name: str | None = None
-    subscribed: bool = True
-    attributes: dict[str, object] = Field(default_factory=dict)
+    first_name: str | None = Field(default=None, alias="firstName")
+    last_name: str | None = Field(default=None, alias="lastName")
+    metadata: dict[str, object] = Field(default_factory=dict)
     created_at: str = Field(alias="createdAt")
-    updated_at: str | None = Field(default=None, alias="updatedAt")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -24,6 +36,13 @@ class AudienceDetail(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_contacts_count(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "totalContacts" not in data and "contactsCount" in data:
+            return {**data, "totalContacts": data["contactsCount"]}
+        return data
+
     @property
     def contacts_count(self) -> int:
         return self.total_contacts
@@ -31,7 +50,7 @@ class AudienceDetail(BaseModel):
 
 class ListAudiencesResponse(BaseModel):
     audiences: list[AudienceDetail] = Field(default_factory=list)
-    next_cursor: str | None = Field(default=None, alias="nextCursor")
+    total: int = 0
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -39,12 +58,20 @@ class ListAudiencesResponse(BaseModel):
 class ListContactsResponse(BaseModel):
     contacts: list[ContactDetail] = Field(default_factory=list)
     total: int = 0
-    next_cursor: str | None = Field(default=None, alias="nextCursor")
 
     model_config = ConfigDict(populate_by_name=True)
 
 
+class BulkContactError(BaseModel):
+    email: str
+    reason: str
+
+
 class BulkAddContactsResponse(BaseModel):
-    inserted: int
-    updated: int
-    failed: int
+    inserted: int = 0
+    skipped: int = 0
+    errors: list[BulkContactError] = Field(default_factory=list)
+
+
+class UpdateResult(BaseModel):
+    id: str

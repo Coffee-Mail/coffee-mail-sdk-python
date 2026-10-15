@@ -1,6 +1,29 @@
 from coffeemail.core.http import AsyncHttpTransport, HttpTransport
 from coffeemail.core.types import CoffeeMailResponse
-from coffeemail.models.stats import EmailStats
+from coffeemail.models.stats import EmailStats, StatsEmailType, StatsGranularity, StatsPeriod
+from coffeemail.resources._common import compact, parse_model
+
+STATS_PATH = "/v1/product/stats"
+
+
+def _stats_params(
+    start_date: str | None,
+    end_date: str | None,
+    domain_id: str | None,
+    tag: str | None,
+    granularity: StatsGranularity | None,
+    period: StatsPeriod | None,
+    email_type: StatsEmailType | None,
+) -> dict[str, object]:
+    return compact(
+        startDate=start_date,
+        endDate=end_date,
+        domainId=domain_id,
+        tag=tag,
+        granularity=granularity,
+        period=period,
+        emailType=email_type,
+    )
 
 
 class Stats:
@@ -9,20 +32,22 @@ class Stats:
 
     def get(
         self,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        domain_id: str | None = None,
+        tag: str | None = None,
+        granularity: StatsGranularity | None = None,
+        period: StatsPeriod | None = None,
+        email_type: StatsEmailType | None = None,
     ) -> CoffeeMailResponse[EmailStats]:
-        params: dict[str, object] = {}
-        if from_date:
-            params["from"] = from_date
-        if to_date:
-            params["to"] = to_date
-
-        res = self._transport.request("GET", "/v1/product/stats", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=EmailStats.model_validate(res.data), error=None, status_code=res.status_code
+        params = _stats_params(
+            start_date, end_date, domain_id, tag, granularity, period, email_type
+        )
+        return parse_model(
+            self._transport.request("GET", STATS_PATH, params=params),
+            EmailStats,
+            self._transport.locale,
         )
 
 
@@ -32,18 +57,17 @@ class AsyncStats:
 
     async def get(
         self,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        domain_id: str | None = None,
+        tag: str | None = None,
+        granularity: StatsGranularity | None = None,
+        period: StatsPeriod | None = None,
+        email_type: StatsEmailType | None = None,
     ) -> CoffeeMailResponse[EmailStats]:
-        params: dict[str, object] = {}
-        if from_date:
-            params["from"] = from_date
-        if to_date:
-            params["to"] = to_date
-
-        res = await self._transport.request("GET", "/v1/product/stats", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=EmailStats.model_validate(res.data), error=None, status_code=res.status_code
+        params = _stats_params(
+            start_date, end_date, domain_id, tag, granularity, period, email_type
         )
+        res = await self._transport.request("GET", STATS_PATH, params=params)
+        return parse_model(res, EmailStats, self._transport.locale)

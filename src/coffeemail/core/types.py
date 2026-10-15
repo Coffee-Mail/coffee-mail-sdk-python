@@ -41,10 +41,7 @@ class CoffeeMailResponse(Generic[T]):
 class ApiKeyIntrospection(BaseModel):
     id: str
     name: str
-    environment: str
+    organisation_id: str | None = Field(default=None, alias="organisationId")
     scopes: list[str] = Field(default_factory=list)
-    rate_limit: dict[str, object] = Field(default_factory=dict, alias="rateLimit")
-    created_at: str = Field(alias="createdAt")
-    expires_at: str | None = Field(default=None, alias="expiresAt")
 
     model_config = ConfigDict(populate_by_name=True)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "coffeemail"
-version = "0.1.1"
+version = "0.2.0"
 description = "SDK oficial do CoffeeMail para Python (Síncrono e Assíncrono com tipagem estrita)."
 readme = "README.md"
 license = { text = "MIT" }
@@ -33,6 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "mypy>=1.9.0",
+    "openapi-core>=0.19",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-mock>=3.12.0",

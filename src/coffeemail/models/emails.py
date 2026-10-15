@@ -14,6 +14,7 @@ EmailStatus = Literal[
     "scheduled",
     "cancelled",
 ]
+EmailType = Literal["transactional", "broadcast"]
 
 
 class EmailParticipant(BaseModel):
@@ -37,31 +38,39 @@ class EmailTag(BaseModel):
 
 
 class SendEmailPayload(BaseModel):
+    """Dados de um envio.
+
+    ``idempotency_key`` e ``sandbox`` viram os headers ``X-Idempotency-Key`` e
+    ``X-Coffeemail-Sandbox`` e não vão no corpo. Sem chave de idempotência, a API trata
+    envios com payload idêntico como o mesmo envio.
+    """
+
     from_address: str | EmailParticipant = Field(alias="from")
-    to: str | EmailParticipant
-    subject: str
+    to: str | EmailParticipant | list[str | EmailParticipant]
+    subject: str | None = None
     html: str | None = None
     text: str | None = None
     cc: str | EmailParticipant | list[str | EmailParticipant] | None = None
     bcc: str | EmailParticipant | list[str | EmailParticipant] | None = None
-    reply_to: str | EmailParticipant | list[str | EmailParticipant] | None = Field(
-        default=None, alias="replyTo"
-    )
+    reply_to: str | EmailParticipant | None = Field(default=None, alias="replyTo")
     headers: dict[str, str] | None = None
     attachments: list[EmailAttachment] | None = None
     tags: list[EmailTag] | None = None
     template_id: str | None = Field(default=None, alias="templateId")
     variables: dict[str, object] | None = None
+    email_type: EmailType | None = Field(default=None, alias="emailType")
+    suppression_category: str | None = Field(default=None, alias="suppressionCategory")
     scheduled_at: str | None = Field(default=None, alias="scheduledAt")
-    track_opens: bool | None = Field(default=None, alias="trackOpens")
-    track_clicks: bool | None = Field(default=None, alias="trackClicks")
+    metadata: dict[str, object] | None = None
+    idempotency_key: str | None = Field(default=None, alias="idempotencyKey", exclude=True)
+    sandbox: bool = Field(default=False, exclude=True)
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class SendEmailResponse(BaseModel):
     id: str
-    status: EmailStatus
+    status: EmailStatus | str
     queued_at: str | None = Field(default=None, alias="queuedAt")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -87,17 +96,39 @@ BatchSendEmailResult = Annotated[
 ]
 
 
+class ApiKeyRef(BaseModel):
+    id: str
+    name: str
+
+
 class EmailDetail(BaseModel):
     id: str
     from_address: str = Field(alias="from")
-    to: str
-    subject: str
-    status: EmailStatus
+    to: list[str] = Field(default_factory=list)
+    cc: list[str] | None = None
+    bcc: list[str] | None = None
+    subject: str | None = None
+    status: EmailStatus | str
+    attempts: int = 0
+    last_error: str | None = Field(default=None, alias="lastError")
+    message_id: str | None = Field(default=None, alias="messageId")
+    api_key: ApiKeyRef | None = Field(default=None, alias="apiKey")
     created_at: str = Field(alias="createdAt")
+    scheduled_at: str | None = Field(default=None, alias="scheduledAt")
     sent_at: str | None = Field(default=None, alias="sentAt")
     delivered_at: str | None = Field(default=None, alias="deliveredAt")
+    bounced_at: str | None = Field(default=None, alias="bouncedAt")
+    failed_at: str | None = Field(default=None, alias="failedAt")
+    complained_at: str | None = Field(default=None, alias="complainedAt")
+    suppressed_at: str | None = Field(default=None, alias="suppressedAt")
     opened_at: str | None = Field(default=None, alias="openedAt")
-    clicked_at: str | None = Field(default=None, alias="clickedAt")
+    first_clicked_at: str | None = Field(default=None, alias="firstClickedAt")
+    open_count: int = Field(default=0, alias="openCount")
+    click_count: int = Field(default=0, alias="clickCount")
+    proxy_open_count: int = Field(default=0, alias="proxyOpenCount")
+    tags: list[EmailTag] | None = None
+    html: str | None = None
+    text: str | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -107,3 +138,23 @@ class ListEmailsResponse(BaseModel):
     next_cursor: str | None = Field(default=None, alias="nextCursor")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class EmailEvent(BaseModel):
+    type: str
+    timestamp: str
+    metadata: dict[str, object] | None = None
+
+
+class EmailEventsResponse(BaseModel):
+    id: str
+    events: list[EmailEvent] = Field(default_factory=list)
+
+
+class EmailTagValues(BaseModel):
+    name: str
+    values: list[str] = Field(default_factory=list)
+
+
+class ListEmailTagsResponse(BaseModel):
+    tags: list[EmailTagValues] = Field(default_factory=list)

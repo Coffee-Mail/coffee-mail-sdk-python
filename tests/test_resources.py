@@ -16,15 +16,26 @@ class FakeTransport:
         self.status_code = status_code
         self.calls: list[dict[str, Any]] = []
 
+    locale = "pt-BR"
+
     def request(
         self,
         method: str,
         path: str,
         params: Any = None,
         json_data: Any = None,
+        headers: Any = None,
+        permission_operation: Any = None,
     ) -> CoffeeMailResponse[Any]:
         self.calls.append(
-            {"method": method, "path": path, "params": params, "json_data": json_data}
+            {
+                "method": method,
+                "path": path,
+                "params": params,
+                "json_data": json_data,
+                "headers": headers,
+                "permission_operation": permission_operation,
+            }
         )
         return CoffeeMailResponse(data=self.payload, error=self.error, status_code=self.status_code)
 
@@ -48,12 +59,29 @@ def test_suppressions_list_repassa_paginacao() -> None:
     assert transport.calls[0]["params"] == {"limit": 25, "after": "cur_1"}
 
 
-def test_suppressions_check_remove_espacos_do_email() -> None:
-    transport = FakeTransport(payload={"suppressed": False})
+def test_suppressions_get_usa_o_id_no_caminho() -> None:
+    transport = FakeTransport(
+        payload={"id": "sup_1", "email": "x@d.com", "reason": "bounce", "createdAt": "2026-01-01"}
+    )
 
-    Suppressions(transport).check("  alguem@dominio.com  ")  # type: ignore[arg-type]
+    out = Suppressions(transport).get("sup_1")  # type: ignore[arg-type]
 
-    assert transport.calls[0]["path"] == "/v1/product/suppressions/alguem@dominio.com"
+    assert transport.calls[0]["path"] == "/v1/product/suppressions/sup_1"
+    assert out.data is not None
+    assert out.data.reason == "bounce"
+
+
+def test_suppressions_recusa_email_no_lugar_do_id_sem_chamar_a_api() -> None:
+    transport = FakeTransport(payload={})
+
+    get = Suppressions(transport).get("alguem@dominio.com")  # type: ignore[arg-type]
+    delete = Suppressions(transport).delete("alguem@dominio.com")  # type: ignore[arg-type]
+
+    assert transport.calls == []
+    for out in (get, delete):
+        assert out.error is not None
+        assert out.error.code == "VALIDATION_ERROR"
+        assert "id da supressão" in out.error.message
 
 
 def test_suppressions_create_usa_manual_como_motivo_padrao() -> None:
@@ -74,7 +102,7 @@ def test_suppressions_create_usa_manual_como_motivo_padrao() -> None:
 def test_erro_do_transporte_nao_vira_dado_valido() -> None:
     transport = FakeTransport(payload=None, error=NotFoundError("nao encontrado"), status_code=404)
 
-    out = Suppressions(transport).check("sumiu@dominio.com")  # type: ignore[arg-type]
+    out = Suppressions(transport).get("sup_sumiu")  # type: ignore[arg-type]
 
     assert out.data is None
     assert out.error is not None
@@ -107,8 +135,11 @@ class FakeListTransport(FakeTransport):
         method: str,
         path: str,
         json_data: Any = None,
+        headers: Any = None,
     ) -> CoffeeMailResponse[Any]:
-        self.calls.append({"method": method, "path": path, "json_data": json_data})
+        self.calls.append(
+            {"method": method, "path": path, "json_data": json_data, "headers": headers}
+        )
         return CoffeeMailResponse(data=self.payload, error=self.error, status_code=self.status_code)
 
 

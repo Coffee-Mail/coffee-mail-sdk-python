@@ -78,22 +78,60 @@ def test_error_envelope_is_unwrapped_from_the_nested_error_object() -> None:
         {
             "error": {
                 "message": "Destinatário inválido",
-                "code": "VALIDATION_ERROR",
+                "code": "VALIDATION_FAILED",
                 "details": {"field": "to"},
             }
         },
+        fallback_message="fallback",
     )
 
     assert isinstance(error, ValidationError)
     assert error.message == "Destinatário inválido"
     assert error.code == "VALIDATION_ERROR"
+    assert error.api_code == "VALIDATION_FAILED"
     assert error.details == {"field": "to"}
 
 
-def test_error_envelope_still_reads_a_flat_body() -> None:
+def test_error_envelope_still_reads_a_root_message() -> None:
     from coffeemail.core.errors import NotFoundError, create_error_from_response
 
-    error = create_error_from_response(404, {"message": "não encontrado", "code": "NOT_FOUND"})
+    error = create_error_from_response(404, {"message": "não encontrado"}, fallback_message="x")
 
     assert isinstance(error, NotFoundError)
     assert error.message == "não encontrado"
+    assert error.code == "NOT_FOUND"
+
+
+def test_payload_fields_follow_the_contract() -> None:
+    wire = _build_send_payload(
+        SendEmailPayload(
+            from_address="a@b.com",
+            to="c@d.com",
+            subject="x",
+            text="x",
+            email_type="broadcast",
+            suppression_category="newsletter",
+            metadata={"pedido": 1},
+            idempotency_key="k1",
+            sandbox=True,
+        )
+    )
+    assert wire["emailType"] == "broadcast"
+    assert wire["suppressionCategory"] == "newsletter"
+    assert wire["metadata"] == {"pedido": 1}
+    for header_only in ("idempotencyKey", "idempotency_key", "sandbox", "trackOpens"):
+        assert header_only not in wire
+
+
+def test_dict_payload_drops_header_only_keys() -> None:
+    wire = _build_send_payload(
+        {
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "x",
+            "idempotencyKey": "k",
+            "isSandbox": True,
+        }
+    )
+    assert "idempotencyKey" not in wire
+    assert "isSandbox" not in wire

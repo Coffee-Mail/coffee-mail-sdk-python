@@ -1,21 +1,27 @@
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-BroadcastStatus = Literal["draft", "scheduled", "sending", "completed", "cancelled"]
+BroadcastStatus = Literal["draft", "scheduled", "sending", "sent", "failed", "cancelled"]
 
 
 class BroadcastDetail(BaseModel):
     id: str
-    name: str
-    subject: str
-    status: BroadcastStatus
     audience_id: str = Field(alias="audienceId")
+    audience_name: str | None = Field(default=None, alias="audienceName")
     template_id: str | None = Field(default=None, alias="templateId")
+    subject: str = ""
+    from_email: str = Field(default="", alias="fromEmail")
+    reply_to: str | None = Field(default=None, alias="replyTo")
+    status: BroadcastStatus | str
     scheduled_at: str | None = Field(default=None, alias="scheduledAt")
     sent_at: str | None = Field(default=None, alias="sentAt")
-    total_recipients: int = Field(default=0, alias="totalRecipients")
+    cancelled_at: str | None = Field(default=None, alias="cancelledAt")
+    recipients_total: int = Field(default=0, alias="recipientsTotal")
+    recipients_queued: int = Field(default=0, alias="recipientsQueued")
+    recipients_failed: int = Field(default=0, alias="recipientsFailed")
     created_at: str = Field(alias="createdAt")
+    updated_at: str | None = Field(default=None, alias="updatedAt")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -23,5 +29,32 @@ class BroadcastDetail(BaseModel):
 class ListBroadcastsResponse(BaseModel):
     broadcasts: list[BroadcastDetail] = Field(default_factory=list)
     next_cursor: str | None = Field(default=None, alias="nextCursor")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SendBroadcastResult(BaseModel):
+    id: str
+    status: BroadcastStatus | str
+    recipients_total: int = Field(default=0, alias="recipientsTotal")
+    recipients_queued: int = Field(default=0, alias="recipientsQueued")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CancelBroadcastResult(BaseModel):
+    id: str
+    status: BroadcastStatus | str
+    cancelled_at: str | None = Field(default=None, alias="cancelledAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TestSendResult(BaseModel):
+    __test__: ClassVar[bool] = False
+
+    success: bool
+    message_id: str = Field(default="", alias="messageId")
+    recipient: str = ""
 
     model_config = ConfigDict(populate_by_name=True)

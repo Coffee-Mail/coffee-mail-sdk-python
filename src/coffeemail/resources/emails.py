@@ -1,21 +1,31 @@
 import base64
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from pydantic import TypeAdapter
 
 from coffeemail.core.errors import ValidationError
-from coffeemail.core.http import AsyncHttpTransport, HttpTransport
+from coffeemail.core.http import AsyncHttpTransport, HttpTransport, send_headers
 from coffeemail.core.types import CoffeeMailResponse
 from coffeemail.models.emails import (
     BatchSendEmailResult,
     EmailAttachment,
     EmailDetail,
+    EmailEventsResponse,
     EmailParticipant,
     ListEmailsResponse,
+    ListEmailTagsResponse,
     SendEmailPayload,
     SendEmailResponse,
+)
+from coffeemail.resources._common import (
+    InputError,
+    build_input,
+    compact,
+    input_failure,
+    parse_adapter,
+    parse_model,
 )
 
 _NAMED_EMAIL_PATTERN = re.compile(r"^(?:(?P<name>.*?)\s*<)?(?P<email>[^<>\s]+)>?$")
@@ -55,9 +65,7 @@ def _normalize_participant(
             payload["name"] = str(item["name"]).strip()
         return payload
 
-    raise ValidationError(
-        "Destinatário inválido. Forneça uma string com e-mail ou objeto com campo 'email'."
-    )
+    raise InputError("invalid_recipient")
 
 
 def _normalize_participants(
@@ -71,26 +79,25 @@ def _normalize_participants(
         return [_normalize_participant(i) for i in items]
     if isinstance(items, (str, EmailParticipant, dict)):
         return [_normalize_participant(items)]
-    return None
+    if items is None:
+        return None
+    raise InputError("invalid_recipient")
 
 
 def _attachment_fields(
     attachment: EmailAttachment | dict[str, object],
 ) -> tuple[str, object, str, str, str | None]:
-    if isinstance(attachment, dict):
-        return (
-            str(attachment["filename"]),
-            attachment["content"],
-            str(attachment.get("contentType", "application/octet-stream")),
-            str(attachment.get("disposition", "attachment")),
-            str(attachment.get("cid")) if attachment.get("cid") else None,
-        )
+    model = (
+        attachment
+        if isinstance(attachment, EmailAttachment)
+        else EmailAttachment.model_validate(attachment)
+    )
     return (
-        attachment.filename,
-        attachment.content,
-        attachment.content_type or "application/octet-stream",
-        attachment.disposition or "attachment",
-        attachment.cid,
+        model.filename,
+        model.content,
+        model.content_type or "application/octet-stream",
+        model.disposition or "attachment",
+        model.cid,
     )
 
 
@@ -121,12 +128,30 @@ def _serialize_attachment(
     return res
 
 
-def _build_send_payload(payload: SendEmailPayload | dict[str, object]) -> dict[str, object]:
+_HEADER_ONLY_KEYS = ("idempotencyKey", "idempotency_key", "sandbox", "isSandbox")
+
+
+def _header_fields(data: dict[str, object]) -> tuple[str | None, bool]:
+    key = data.get("idempotencyKey") or data.get("idempotency_key")
+    sandbox = bool(data.get("sandbox") or data.get("isSandbox"))
+    return (str(key) if key else None), sandbox
+
+
+def _send_headers(payload: SendEmailPayload | Mapping[str, object]) -> dict[str, str]:
+    if isinstance(payload, SendEmailPayload):
+        return send_headers(payload.idempotency_key, payload.sandbox)
+    key, sandbox = _header_fields(dict(payload))
+    return send_headers(key, sandbox)
+
+
+def _build_send_payload(payload: SendEmailPayload | Mapping[str, object]) -> dict[str, object]:
     data = (
         payload.model_dump(by_alias=True, exclude_none=True)
         if isinstance(payload, SendEmailPayload)
-        else payload.copy()
+        else dict(payload)
     )
+    for key in _HEADER_ONLY_KEYS:
+        data.pop(key, None)
 
     from_val = data.get("from") or data.get("from_address")
     if from_val:
@@ -151,6 +176,32 @@ def _build_send_payload(payload: SendEmailPayload | dict[str, object]) -> dict[s
     return data
 
 
+def _batch_headers(emails: Sequence[SendEmailPayload | Mapping[str, object]]) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for email in emails:
+        merged.update(_send_headers(email))
+    return merged
+
+
+def _list_params(
+    limit: int | None,
+    after: str | None,
+    status: str | None,
+    recipient: str | None,
+    tag: str | None,
+    from_date: str | None,
+    to_date: str | None,
+) -> dict[str, object]:
+    return compact(
+        limit=limit,
+        after=after,
+        status=status,
+        recipient=recipient,
+        tag=tag,
+        **{"from": from_date, "to": to_date},
+    )
+
+
 _BATCH_RESULTS_ADAPTER: TypeAdapter[list[BatchSendEmailResult]] = TypeAdapter(
     list[BatchSendEmailResult]
 )
@@ -161,71 +212,60 @@ class Emails:
         self._transport = transport
 
     def send(
-        self, payload: SendEmailPayload | dict[str, object]
+        self, payload: SendEmailPayload | Mapping[str, object]
     ) -> CoffeeMailResponse[SendEmailResponse]:
-        body = _build_send_payload(payload)
-        res = self._transport.request("POST", "/v1/product/emails", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=SendEmailResponse.model_validate(res.data), error=None, status_code=res.status_code
+        body = build_input(lambda: _build_send_payload(payload), self._transport.locale)
+        if isinstance(body, ValidationError):
+            return input_failure(body)
+        res = self._transport.request(
+            "POST", "/v1/product/emails", json_data=body, headers=_send_headers(payload)
         )
+        return parse_model(res, SendEmailResponse, self._transport.locale)
 
     def send_batch(
-        self, emails: list[SendEmailPayload | dict[str, object]]
+        self, emails: Sequence[SendEmailPayload | Mapping[str, object]]
     ) -> CoffeeMailResponse[list[BatchSendEmailResult]]:
-        body: list[object] = [_build_send_payload(e) for e in emails]
-        res = self._transport.request_list("POST", "/v1/product/emails/batch", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=_BATCH_RESULTS_ADAPTER.validate_python(res.data),
-            error=None,
-            status_code=res.status_code,
+        body = build_input(lambda: [_build_send_payload(e) for e in emails], self._transport.locale)
+        if isinstance(body, ValidationError):
+            return input_failure(body)
+        res = self._transport.request_list(
+            "POST", "/v1/product/emails/batch", json_data=body, headers=_batch_headers(emails)
         )
+        return parse_adapter(res, _BATCH_RESULTS_ADAPTER, self._transport.locale)
 
     def get(self, email_id: str) -> CoffeeMailResponse[EmailDetail]:
         res = self._transport.request("GET", f"/v1/product/emails/{email_id}")
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=EmailDetail.model_validate(res.data), error=None, status_code=res.status_code
-        )
+        return parse_model(res, EmailDetail, self._transport.locale)
 
     def list(
         self,
         limit: int | None = None,
         after: str | None = None,
         status: str | None = None,
+        *,
+        recipient: str | None = None,
+        tag: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> CoffeeMailResponse[ListEmailsResponse]:
-        params: dict[str, object] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if after is not None:
-            params["after"] = after
-        if status is not None:
-            params["status"] = status
-
+        params = _list_params(limit, after, status, recipient, tag, from_date, to_date)
         res = self._transport.request("GET", "/v1/product/emails", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=ListEmailsResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
-        )
+        return parse_model(res, ListEmailsResponse, self._transport.locale)
 
     def cancel(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return self._transport.request("POST", f"/v1/product/emails/{email_id}/cancel")
 
-    def get_events(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("GET", f"/v1/product/emails/{email_id}/events")
+    def get_events(self, email_id: str) -> CoffeeMailResponse[EmailEventsResponse]:
+        res = self._transport.request("GET", f"/v1/product/emails/{email_id}/events")
+        return parse_model(res, EmailEventsResponse, self._transport.locale)
 
-    def get_tags(self) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("GET", "/v1/product/emails/tags")
+    def get_tags(self) -> CoffeeMailResponse[ListEmailTagsResponse]:
+        res = self._transport.request("GET", "/v1/product/emails/tags")
+        return parse_model(res, ListEmailTagsResponse, self._transport.locale)
 
-    def resend(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("POST", f"/v1/product/emails/{email_id}/resend")
+    def resend(self, email_id: str) -> CoffeeMailResponse[SendEmailResponse]:
+        res = self._transport.request("POST", f"/v1/product/emails/{email_id}/resend")
+        return parse_model(res, SendEmailResponse, self._transport.locale)
 
 
 class AsyncEmails:
@@ -233,68 +273,57 @@ class AsyncEmails:
         self._transport = transport
 
     async def send(
-        self, payload: SendEmailPayload | dict[str, object]
+        self, payload: SendEmailPayload | Mapping[str, object]
     ) -> CoffeeMailResponse[SendEmailResponse]:
-        body = _build_send_payload(payload)
-        res = await self._transport.request("POST", "/v1/product/emails", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=SendEmailResponse.model_validate(res.data), error=None, status_code=res.status_code
+        body = build_input(lambda: _build_send_payload(payload), self._transport.locale)
+        if isinstance(body, ValidationError):
+            return input_failure(body)
+        res = await self._transport.request(
+            "POST", "/v1/product/emails", json_data=body, headers=_send_headers(payload)
         )
+        return parse_model(res, SendEmailResponse, self._transport.locale)
 
     async def send_batch(
-        self, emails: list[SendEmailPayload | dict[str, object]]
+        self, emails: Sequence[SendEmailPayload | Mapping[str, object]]
     ) -> CoffeeMailResponse[list[BatchSendEmailResult]]:
-        body: list[object] = [_build_send_payload(e) for e in emails]
-        res = await self._transport.request_list("POST", "/v1/product/emails/batch", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=_BATCH_RESULTS_ADAPTER.validate_python(res.data),
-            error=None,
-            status_code=res.status_code,
+        body = build_input(lambda: [_build_send_payload(e) for e in emails], self._transport.locale)
+        if isinstance(body, ValidationError):
+            return input_failure(body)
+        res = await self._transport.request_list(
+            "POST", "/v1/product/emails/batch", json_data=body, headers=_batch_headers(emails)
         )
+        return parse_adapter(res, _BATCH_RESULTS_ADAPTER, self._transport.locale)
 
     async def get(self, email_id: str) -> CoffeeMailResponse[EmailDetail]:
         res = await self._transport.request("GET", f"/v1/product/emails/{email_id}")
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=EmailDetail.model_validate(res.data), error=None, status_code=res.status_code
-        )
+        return parse_model(res, EmailDetail, self._transport.locale)
 
     async def list(
         self,
         limit: int | None = None,
         after: str | None = None,
         status: str | None = None,
+        *,
+        recipient: str | None = None,
+        tag: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> CoffeeMailResponse[ListEmailsResponse]:
-        params: dict[str, object] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if after is not None:
-            params["after"] = after
-        if status is not None:
-            params["status"] = status
-
+        params = _list_params(limit, after, status, recipient, tag, from_date, to_date)
         res = await self._transport.request("GET", "/v1/product/emails", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=ListEmailsResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
-        )
+        return parse_model(res, ListEmailsResponse, self._transport.locale)
 
     async def cancel(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
         return await self._transport.request("POST", f"/v1/product/emails/{email_id}/cancel")
 
-    async def get_events(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request("GET", f"/v1/product/emails/{email_id}/events")
+    async def get_events(self, email_id: str) -> CoffeeMailResponse[EmailEventsResponse]:
+        res = await self._transport.request("GET", f"/v1/product/emails/{email_id}/events")
+        return parse_model(res, EmailEventsResponse, self._transport.locale)
 
-    async def get_tags(self) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request("GET", "/v1/product/emails/tags")
+    async def get_tags(self) -> CoffeeMailResponse[ListEmailTagsResponse]:
+        res = await self._transport.request("GET", "/v1/product/emails/tags")
+        return parse_model(res, ListEmailTagsResponse, self._transport.locale)
 
-    async def resend(self, email_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request("POST", f"/v1/product/emails/{email_id}/resend")
+    async def resend(self, email_id: str) -> CoffeeMailResponse[SendEmailResponse]:
+        res = await self._transport.request("POST", f"/v1/product/emails/{email_id}/resend")
+        return parse_model(res, SendEmailResponse, self._transport.locale)

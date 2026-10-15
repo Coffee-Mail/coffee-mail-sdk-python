@@ -1,277 +1,390 @@
+from collections.abc import Mapping, Sequence
+
+from coffeemail.core.errors import ValidationError
 from coffeemail.core.http import AsyncHttpTransport, HttpTransport
 from coffeemail.core.types import CoffeeMailResponse
+from coffeemail.models.broadcasts import TestSendResult
 from coffeemail.models.templates import (
+    FormatTemplateResponse,
     ListTemplatesResponse,
     PreviewTemplateResponse,
     TemplateDetail,
+    TemplateFormat,
+    TemplateLocale,
+    TemplateVariable,
+    TestRenderTemplateResponse,
 )
+from coffeemail.resources._common import build_input, compact, input_failure, parse_model
+
+TEMPLATES_PATH = "/v1/product/templates"
+
+VariableLike = TemplateVariable | Mapping[str, object]
+
+
+def _variables(variables: Sequence[VariableLike] | None) -> list[dict[str, object]] | None:
+    if variables is None:
+        return None
+    models = [
+        v if isinstance(v, TemplateVariable) else TemplateVariable.model_validate(v)
+        for v in variables
+    ]
+    return [m.model_dump(by_alias=True, exclude_none=True) for m in models]
+
+
+def _mapping(value: Mapping[str, object] | None) -> dict[str, object] | None:
+    return dict(value) if value is not None else None
+
+
+def _template_body(
+    *,
+    name: str | None,
+    html: str | None,
+    alias: str | None,
+    subject: str | None,
+    preheader: str | None,
+    content_json: Mapping[str, object] | None,
+    text_payload: str | None,
+    variables: Sequence[VariableLike] | None,
+    format: TemplateFormat | None,
+    source_locale: TemplateLocale | None,
+    is_active: bool | None = None,
+) -> dict[str, object]:
+    return compact(
+        name=name,
+        html=html,
+        alias=alias,
+        subject=subject,
+        preheader=preheader,
+        contentJson=_mapping(content_json),
+        textPayload=text_payload,
+        variables=_variables(variables),
+        format=format,
+        sourceLocale=source_locale,
+        isActive=is_active,
+    )
+
+
+def _render_body(
+    html: str, format: TemplateFormat | None, variables: Mapping[str, object] | None
+) -> dict[str, object]:
+    return compact(html=html, format=format, variables=_mapping(variables))
+
+
+def _test_send_body(
+    to: str, from_email: str | None, subject: str | None, variables: Mapping[str, object] | None
+) -> dict[str, object]:
+    return compact(
+        to=to.strip(), subject=subject, variables=_mapping(variables), **{"from": from_email}
+    )
 
 
 class Templates:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    def list(
-        self,
-        limit: int | None = None,
-        after: str | None = None,
-    ) -> CoffeeMailResponse[ListTemplatesResponse]:
-        params: dict[str, object] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if after is not None:
-            params["after"] = after
-
-        res = self._transport.request("GET", "/v1/product/templates", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=ListTemplatesResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
+    def list(self) -> CoffeeMailResponse[ListTemplatesResponse]:
+        return parse_model(
+            self._transport.request("GET", TEMPLATES_PATH),
+            ListTemplatesResponse,
+            self._transport.locale,
         )
 
     def get(self, template_id: str) -> CoffeeMailResponse[TemplateDetail]:
-        res = self._transport.request("GET", f"/v1/product/templates/{template_id}")
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=TemplateDetail.model_validate(res.data), error=None, status_code=res.status_code
-        )
+        res = self._transport.request("GET", f"{TEMPLATES_PATH}/{template_id}")
+        return parse_model(res, TemplateDetail, self._transport.locale)
 
     def create(
         self,
         name: str,
         html: str,
+        *,
+        alias: str | None = None,
         subject: str | None = None,
-        description: str | None = None,
-        text: str | None = None,
+        preheader: str | None = None,
+        content_json: Mapping[str, object] | None = None,
+        text_payload: str | None = None,
+        variables: Sequence[VariableLike] | None = None,
+        format: TemplateFormat | None = None,
+        source_locale: TemplateLocale | None = None,
     ) -> CoffeeMailResponse[TemplateDetail]:
-        body: dict[str, object] = {"name": name, "html": html}
-        if subject is not None:
-            body["subject"] = subject
-        if description is not None:
-            body["description"] = description
-        if text is not None:
-            body["text"] = text
-
-        res = self._transport.request("POST", "/v1/product/templates", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=TemplateDetail.model_validate(res.data), error=None, status_code=res.status_code
+        body = build_input(
+            lambda: _template_body(
+                name=name,
+                html=html,
+                alias=alias,
+                subject=subject,
+                preheader=preheader,
+                content_json=content_json,
+                text_payload=text_payload,
+                variables=variables,
+                format=format,
+                source_locale=source_locale,
+            ),
+            self._transport.locale,
         )
+        if isinstance(body, ValidationError):
+            return input_failure(body)
+        res = self._transport.request("POST", TEMPLATES_PATH, json_data=body)
+        return parse_model(res, TemplateDetail, self._transport.locale)
 
     def update(
         self,
         template_id: str,
+        *,
         name: str | None = None,
         html: str | None = None,
+        alias: str | None = None,
         subject: str | None = None,
-        description: str | None = None,
-        text: str | None = None,
+        preheader: str | None = None,
+        content_json: Mapping[str, object] | None = None,
+        text_payload: str | None = None,
+        variables: Sequence[VariableLike] | None = None,
+        format: TemplateFormat | None = None,
+        source_locale: TemplateLocale | None = None,
+        is_active: bool | None = None,
     ) -> CoffeeMailResponse[TemplateDetail]:
-        body: dict[str, object] = {}
-        if name is not None:
-            body["name"] = name
-        if html is not None:
-            body["html"] = html
-        if subject is not None:
-            body["subject"] = subject
-        if description is not None:
-            body["description"] = description
-        if text is not None:
-            body["text"] = text
-
-        res = self._transport.request(
-            "PATCH", f"/v1/product/templates/{template_id}", json_data=body
+        body = build_input(
+            lambda: _template_body(
+                name=name,
+                html=html,
+                alias=alias,
+                subject=subject,
+                preheader=preheader,
+                content_json=content_json,
+                text_payload=text_payload,
+                variables=variables,
+                format=format,
+                source_locale=source_locale,
+                is_active=is_active,
+            ),
+            self._transport.locale,
         )
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=TemplateDetail.model_validate(res.data), error=None, status_code=res.status_code
-        )
+        if isinstance(body, ValidationError):
+            return input_failure(body)
+        res = self._transport.request("PATCH", f"{TEMPLATES_PATH}/{template_id}", json_data=body)
+        return parse_model(res, TemplateDetail, self._transport.locale)
 
     def delete(self, template_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("DELETE", f"/v1/product/templates/{template_id}")
+        return self._transport.request("DELETE", f"{TEMPLATES_PATH}/{template_id}")
 
     def preview(
         self,
-        html: str | None = None,
-        template_id: str | None = None,
-        variables: dict[str, object] | None = None,
+        html: str,
+        *,
+        format: TemplateFormat | None = None,
+        variables: Mapping[str, object] | None = None,
     ) -> CoffeeMailResponse[PreviewTemplateResponse]:
-        body: dict[str, object] = {}
-        if html:
-            body["html"] = html
-        if template_id:
-            body["templateId"] = template_id
-        if variables:
-            body["variables"] = variables
-
-        res = self._transport.request("POST", "/v1/product/templates/preview", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=PreviewTemplateResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
+        res = self._transport.request(
+            "POST", f"{TEMPLATES_PATH}/preview", json_data=_render_body(html, format, variables)
         )
+        return parse_model(res, PreviewTemplateResponse, self._transport.locale)
+
+    def preview_by_id(
+        self, template_id: str, variables: Mapping[str, object] | None = None
+    ) -> CoffeeMailResponse[PreviewTemplateResponse]:
+        """Busca o template salvo e o renderiza (duas requisições: get + preview)."""
+        template = self.get(template_id)
+        if template.error or template.data is None:
+            return CoffeeMailResponse(
+                data=None, error=template.error, status_code=template.status_code
+            )
+        stored = template.data
+        return self.preview(stored.html, format=_known_format(stored.format), variables=variables)
+
+    def format(
+        self, html: str, *, format: TemplateFormat | None = None
+    ) -> CoffeeMailResponse[FormatTemplateResponse]:
+        res = self._transport.request(
+            "POST", f"{TEMPLATES_PATH}/format", json_data=compact(html=html, format=format)
+        )
+        return parse_model(res, FormatTemplateResponse, self._transport.locale)
+
+    def test_render(
+        self,
+        html: str,
+        *,
+        format: TemplateFormat | None = None,
+        variables: Mapping[str, object] | None = None,
+    ) -> CoffeeMailResponse[TestRenderTemplateResponse]:
+        res = self._transport.request(
+            "POST",
+            f"{TEMPLATES_PATH}/test-render",
+            json_data=_render_body(html, format, variables),
+        )
+        return parse_model(res, TestRenderTemplateResponse, self._transport.locale)
 
     def test_send(
         self,
         template_id: str,
         to: str,
-        variables: dict[str, object] | None = None,
-    ) -> CoffeeMailResponse[dict[str, object]]:
-        body: dict[str, object] = {"to": to}
-        if variables:
-            body["variables"] = variables
-        return self._transport.request(
-            "POST", f"/v1/product/templates/{template_id}/test-send", json_data=body
+        *,
+        from_email: str | None = None,
+        subject: str | None = None,
+        variables: Mapping[str, object] | None = None,
+    ) -> CoffeeMailResponse[TestSendResult]:
+        res = self._transport.request(
+            "POST",
+            f"{TEMPLATES_PATH}/{template_id}/test-send",
+            json_data=_test_send_body(to, from_email, subject, variables),
         )
-
-    def format(self, payload: dict[str, object]) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request("POST", "/v1/product/templates/format", json_data=payload)
-
-    def test_render(self, payload: dict[str, object]) -> CoffeeMailResponse[dict[str, object]]:
-        return self._transport.request(
-            "POST", "/v1/product/templates/test-render", json_data=payload
-        )
+        return parse_model(res, TestSendResult, self._transport.locale)
 
 
 class AsyncTemplates:
     def __init__(self, transport: AsyncHttpTransport) -> None:
         self._transport = transport
 
-    async def list(
-        self,
-        limit: int | None = None,
-        after: str | None = None,
-    ) -> CoffeeMailResponse[ListTemplatesResponse]:
-        params: dict[str, object] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if after is not None:
-            params["after"] = after
-
-        res = await self._transport.request("GET", "/v1/product/templates", params=params)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=ListTemplatesResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
-        )
+    async def list(self) -> CoffeeMailResponse[ListTemplatesResponse]:
+        res = await self._transport.request("GET", TEMPLATES_PATH)
+        return parse_model(res, ListTemplatesResponse, self._transport.locale)
 
     async def get(self, template_id: str) -> CoffeeMailResponse[TemplateDetail]:
-        res = await self._transport.request("GET", f"/v1/product/templates/{template_id}")
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=TemplateDetail.model_validate(res.data), error=None, status_code=res.status_code
-        )
+        res = await self._transport.request("GET", f"{TEMPLATES_PATH}/{template_id}")
+        return parse_model(res, TemplateDetail, self._transport.locale)
 
     async def create(
         self,
         name: str,
         html: str,
+        *,
+        alias: str | None = None,
         subject: str | None = None,
-        description: str | None = None,
-        text: str | None = None,
+        preheader: str | None = None,
+        content_json: Mapping[str, object] | None = None,
+        text_payload: str | None = None,
+        variables: Sequence[VariableLike] | None = None,
+        format: TemplateFormat | None = None,
+        source_locale: TemplateLocale | None = None,
     ) -> CoffeeMailResponse[TemplateDetail]:
-        body: dict[str, object] = {"name": name, "html": html}
-        if subject is not None:
-            body["subject"] = subject
-        if description is not None:
-            body["description"] = description
-        if text is not None:
-            body["text"] = text
-
-        res = await self._transport.request("POST", "/v1/product/templates", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=TemplateDetail.model_validate(res.data), error=None, status_code=res.status_code
+        body = build_input(
+            lambda: _template_body(
+                name=name,
+                html=html,
+                alias=alias,
+                subject=subject,
+                preheader=preheader,
+                content_json=content_json,
+                text_payload=text_payload,
+                variables=variables,
+                format=format,
+                source_locale=source_locale,
+            ),
+            self._transport.locale,
         )
+        if isinstance(body, ValidationError):
+            return input_failure(body)
+        res = await self._transport.request("POST", TEMPLATES_PATH, json_data=body)
+        return parse_model(res, TemplateDetail, self._transport.locale)
 
     async def update(
         self,
         template_id: str,
+        *,
         name: str | None = None,
         html: str | None = None,
+        alias: str | None = None,
         subject: str | None = None,
-        description: str | None = None,
-        text: str | None = None,
+        preheader: str | None = None,
+        content_json: Mapping[str, object] | None = None,
+        text_payload: str | None = None,
+        variables: Sequence[VariableLike] | None = None,
+        format: TemplateFormat | None = None,
+        source_locale: TemplateLocale | None = None,
+        is_active: bool | None = None,
     ) -> CoffeeMailResponse[TemplateDetail]:
-        body: dict[str, object] = {}
-        if name is not None:
-            body["name"] = name
-        if html is not None:
-            body["html"] = html
-        if subject is not None:
-            body["subject"] = subject
-        if description is not None:
-            body["description"] = description
-        if text is not None:
-            body["text"] = text
-
+        body = build_input(
+            lambda: _template_body(
+                name=name,
+                html=html,
+                alias=alias,
+                subject=subject,
+                preheader=preheader,
+                content_json=content_json,
+                text_payload=text_payload,
+                variables=variables,
+                format=format,
+                source_locale=source_locale,
+                is_active=is_active,
+            ),
+            self._transport.locale,
+        )
+        if isinstance(body, ValidationError):
+            return input_failure(body)
         res = await self._transport.request(
-            "PATCH", f"/v1/product/templates/{template_id}", json_data=body
+            "PATCH", f"{TEMPLATES_PATH}/{template_id}", json_data=body
         )
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=TemplateDetail.model_validate(res.data), error=None, status_code=res.status_code
-        )
+        return parse_model(res, TemplateDetail, self._transport.locale)
 
     async def delete(self, template_id: str) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request("DELETE", f"/v1/product/templates/{template_id}")
+        return await self._transport.request("DELETE", f"{TEMPLATES_PATH}/{template_id}")
 
     async def preview(
         self,
-        html: str | None = None,
-        template_id: str | None = None,
-        variables: dict[str, object] | None = None,
+        html: str,
+        *,
+        format: TemplateFormat | None = None,
+        variables: Mapping[str, object] | None = None,
     ) -> CoffeeMailResponse[PreviewTemplateResponse]:
-        body: dict[str, object] = {}
-        if html:
-            body["html"] = html
-        if template_id:
-            body["templateId"] = template_id
-        if variables:
-            body["variables"] = variables
-
-        res = await self._transport.request("POST", "/v1/product/templates/preview", json_data=body)
-        if res.error or res.data is None:
-            return CoffeeMailResponse(data=None, error=res.error, status_code=res.status_code)
-        return CoffeeMailResponse(
-            data=PreviewTemplateResponse.model_validate(res.data),
-            error=None,
-            status_code=res.status_code,
+        res = await self._transport.request(
+            "POST", f"{TEMPLATES_PATH}/preview", json_data=_render_body(html, format, variables)
         )
+        return parse_model(res, PreviewTemplateResponse, self._transport.locale)
+
+    async def preview_by_id(
+        self, template_id: str, variables: Mapping[str, object] | None = None
+    ) -> CoffeeMailResponse[PreviewTemplateResponse]:
+        """Busca o template salvo e o renderiza (duas requisições: get + preview)."""
+        template = await self.get(template_id)
+        if template.error or template.data is None:
+            return CoffeeMailResponse(
+                data=None, error=template.error, status_code=template.status_code
+            )
+        stored = template.data
+        return await self.preview(
+            stored.html, format=_known_format(stored.format), variables=variables
+        )
+
+    async def format(
+        self, html: str, *, format: TemplateFormat | None = None
+    ) -> CoffeeMailResponse[FormatTemplateResponse]:
+        res = await self._transport.request(
+            "POST", f"{TEMPLATES_PATH}/format", json_data=compact(html=html, format=format)
+        )
+        return parse_model(res, FormatTemplateResponse, self._transport.locale)
+
+    async def test_render(
+        self,
+        html: str,
+        *,
+        format: TemplateFormat | None = None,
+        variables: Mapping[str, object] | None = None,
+    ) -> CoffeeMailResponse[TestRenderTemplateResponse]:
+        res = await self._transport.request(
+            "POST",
+            f"{TEMPLATES_PATH}/test-render",
+            json_data=_render_body(html, format, variables),
+        )
+        return parse_model(res, TestRenderTemplateResponse, self._transport.locale)
 
     async def test_send(
         self,
         template_id: str,
         to: str,
-        variables: dict[str, object] | None = None,
-    ) -> CoffeeMailResponse[dict[str, object]]:
-        body: dict[str, object] = {"to": to}
-        if variables:
-            body["variables"] = variables
-        return await self._transport.request(
-            "POST", f"/v1/product/templates/{template_id}/test-send", json_data=body
+        *,
+        from_email: str | None = None,
+        subject: str | None = None,
+        variables: Mapping[str, object] | None = None,
+    ) -> CoffeeMailResponse[TestSendResult]:
+        res = await self._transport.request(
+            "POST",
+            f"{TEMPLATES_PATH}/{template_id}/test-send",
+            json_data=_test_send_body(to, from_email, subject, variables),
         )
+        return parse_model(res, TestSendResult, self._transport.locale)
 
-    async def format(self, payload: dict[str, object]) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request(
-            "POST", "/v1/product/templates/format", json_data=payload
-        )
 
-    async def test_render(
-        self, payload: dict[str, object]
-    ) -> CoffeeMailResponse[dict[str, object]]:
-        return await self._transport.request(
-            "POST", "/v1/product/templates/test-render", json_data=payload
-        )
+_KNOWN_FORMATS: dict[str, TemplateFormat] = {"html": "html", "react": "react"}
+
+
+def _known_format(value: str) -> TemplateFormat | None:
+    return _KNOWN_FORMATS.get(value)

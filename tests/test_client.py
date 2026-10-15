@@ -11,7 +11,7 @@ def test_missing_api_key_raises_authentication_error(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("COFFEEMAIL_API_KEY", raising=False)
     with pytest.raises(AuthenticationError) as exc_info:
         CoffeeMail()
-    assert "Chave de API ausente" in str(exc_info.value)
+    assert "A chave de API não foi informada" in str(exc_info.value)
 
 
 def test_missing_api_key_async_raises_authentication_error(
@@ -20,7 +20,7 @@ def test_missing_api_key_async_raises_authentication_error(
     monkeypatch.delenv("COFFEEMAIL_API_KEY", raising=False)
     with pytest.raises(AuthenticationError) as exc_info:
         AsyncCoffeeMail()
-    assert "Chave de API ausente" in str(exc_info.value)
+    assert "A chave de API não foi informada" in str(exc_info.value)
 
 
 def test_client_init_with_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,7 +44,7 @@ def test_requests_always_target_the_official_api_host() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return httpx.Response(200, json={"data": []})
+        return httpx.Response(200, json={"tags": []})
 
     client = CoffeeMail(
         "cm_live_direct_key", http_client=httpx.Client(transport=httpx.MockTransport(handler))
