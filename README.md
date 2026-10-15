@@ -319,6 +319,9 @@ for email in page.emails:
 | `delete(domain_id)` | `dict` | `DELETE /v1/product/domains/{id}` |
 | `get_health(domain_id)` | `DomainHealthResponse` | `POST /v1/product/domains/{id}/health` |
 | `get_warmup_status(domain_id)` | `DomainWarmupStatus \| None` | `GET /v1/product/domains/{id}/warmup` |
+| `rotate_dkim(domain_id)` | `DkimRotation` | `POST /v1/product/domains/{id}/dkim/rotate` |
+| `set_tracking_domain(domain_id, host)` | `CustomHostStatus` | `PUT /v1/product/domains/{id}/tracking-domain` |
+| `remove_tracking_domain(domain_id)` | `CustomHostStatus \| None` | `DELETE /v1/product/domains/{id}/tracking-domain` |
 
 ```python
 created = client.domains.create("seudominio.com.br").unwrap()
@@ -328,6 +331,18 @@ for record in created.dkim_records_to_publish:
 domain = client.domains.verify(created.id).unwrap()
 print(domain.status, domain.status_reason)
 ```
+
+`DomainDetail` traz também `dkim_rotation` (`DkimRotation | None`), `return_path` e `tracking_domain` (`CustomHostStatus | None`, com `host`, `target`, `verified`, `verified_at` e o `record` CNAME a publicar) e `tracking_domains_available`. `DomainWarmupStatus` informa `status` (`warming` ou `completed`), `total_days`, `started_at` e `completed_at`.
+
+```python
+rotation = client.domains.rotate_dkim(domain.id).unwrap()
+print(rotation.selector, rotation.record.host, rotation.record.value)
+
+tracking = client.domains.set_tracking_domain(domain.id, "links.seudominio.com.br").unwrap()
+print(tracking.record.type, tracking.record.host, tracking.record.value, tracking.verified)
+```
+
+`rotate_dkim` é idempotente: enquanto houver rotação pendente, devolve a mesma. A chave em uso só muda quando o TXT do novo seletor é encontrado no DNS. Erros: `NotFoundError` (`api_code="DOMAIN_NOT_FOUND"`) e `ConflictError` (`api_code="DOMAIN_NOT_VERIFIED"`). `set_tracking_domain` responde `ValidationError` (`api_code="INVALID_TRACKING_HOST"`) para host fora do domínio de envio e `ConflictError` (`api_code="TRACKING_DOMAINS_DISABLED"`) quando a plataforma não oferece tracking próprio.
 
 ### Templates — `client.templates`
 

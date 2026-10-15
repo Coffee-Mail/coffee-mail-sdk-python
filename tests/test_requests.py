@@ -3,7 +3,14 @@ import json
 import httpx
 import pytest
 
-from coffeemail import AsyncCoffeeMail, CoffeeMail, SendEmailPayload
+from coffeemail import (
+    AsyncCoffeeMail,
+    CoffeeMail,
+    ConflictError,
+    NotFoundError,
+    SendEmailPayload,
+    ValidationError,
+)
 from coffeemail.core.http import SDK_VERSION
 
 _EMPTY: dict[str, object] = {}
@@ -345,3 +352,163 @@ def test_contact_subscribed_flag() -> None:
     page = _client([], body).audiences.contacts.list("aud-1")
     assert page.data is not None
     assert [c.subscribed for c in page.data.contacts] == [False, True]
+
+
+_DNS_TXT = {"type": "TXT", "host": "cm2._domainkey.x.com", "value": "v=DKIM1; p=abc", "ttl": 3600}
+_ROTATION = {
+    "domainId": "d1",
+    "selector": "cm2",
+    "startedAt": "2026-10-15T10:00:00.000Z",
+    "record": _DNS_TXT,
+}
+_TRACKING = {
+    "host": "links.x.com",
+    "target": "track.coffeemail.com.br",
+    "verified": False,
+    "verifiedAt": None,
+    "record": {"type": "CNAME", "host": "links.x.com", "value": "track.coffeemail.com.br"},
+}
+
+
+def _error(code: str, status: int) -> tuple[dict[str, object], int]:
+    return {"error": {"code": code, "message": code.lower()}}, status
+
+
+def test_warmup_exposes_status_total_days_and_dates() -> None:
+    body = {
+        "domainId": "d1",
+        "status": "completed",
+        "currentDay": 30,
+        "totalDays": 30,
+        "dailyQuota": 0,
+        "sentToday": 12,
+        "remainingToday": 0,
+        "quotaUsedPercent": 0,
+        "lastSendDate": "2026-10-15",
+        "startedAt": "2026-09-15T10:00:00.000Z",
+        "completedAt": "2026-10-15T10:00:00.000Z",
+    }
+    warmup = _client([], body).domains.get_warmup_status("d1")
+    assert warmup.data is not None
+    assert warmup.data.status == "completed"
+    assert warmup.data.total_days == 30
+    assert warmup.data.started_at == "2026-09-15T10:00:00.000Z"
+    assert warmup.data.completed_at == "2026-10-15T10:00:00.000Z"
+    warming = _client([], {"domainId": "d1", "status": "warming", "completedAt": None})
+    in_progress = warming.domains.get_warmup_status("d1")
+    assert in_progress.data is not None
+    assert in_progress.data.completed_at is None
+
+
+def test_domain_detail_exposes_rotation_return_path_and_tracking() -> None:
+    body = {
+        "id": "d1",
+        "name": "x.com",
+        "status": "verified",
+        "dkimRotation": _ROTATION,
+        "returnPath": {
+            **_TRACKING,
+            "host": "bounces.x.com",
+            "verified": True,
+            "verifiedAt": "2026-10-15T10:00:00.000Z",
+        },
+        "trackingDomain": _TRACKING,
+        "trackingDomainsAvailable": True,
+    }
+    detail = _client([], body).domains.get("d1")
+    assert detail.data is not None
+    assert detail.data.dkim_rotation is not None
+    assert detail.data.dkim_rotation.selector == "cm2"
+    assert detail.data.dkim_rotation.record.ttl == 3600
+    assert detail.data.return_path is not None
+    assert detail.data.return_path.verified is True
+    assert detail.data.tracking_domain is not None
+    assert detail.data.tracking_domain.record.type == "CNAME"
+    assert detail.data.tracking_domains_available is True
+    legacy = _client([], {"id": "d1", "name": "x.com", "status": "pending"}).domains.get("d1")
+    assert legacy.data is not None
+    assert legacy.data.dkim_rotation is None
+    assert legacy.data.return_path is None
+    assert legacy.data.tracking_domain is None
+    assert legacy.data.tracking_domains_available is False
+
+
+def test_rotate_dkim_hits_the_route_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    rotation = _client(captured, _ROTATION).domains.rotate_dkim("d1")
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/domains/d1/dkim/rotate"
+    assert captured[0].content == b""
+    assert rotation.data is not None
+    assert rotation.data.record.host == "cm2._domainkey.x.com"
+    missing = _client([], *_error("DOMAIN_NOT_FOUND", 404)).domains.rotate_dkim("x")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "DOMAIN_NOT_FOUND"
+    pending = _client([], *_error("DOMAIN_NOT_VERIFIED", 409)).domains.rotate_dkim("d1")
+    assert isinstance(pending.error, ConflictError)
+    assert pending.error.api_code == "DOMAIN_NOT_VERIFIED"
+
+
+def test_set_tracking_domain_sends_host_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    status = _client(captured, _TRACKING).domains.set_tracking_domain("d1", " links.x.com ")
+    assert captured[0].method == "PUT"
+    assert captured[0].url.path == "/v1/product/domains/d1/tracking-domain"
+    assert _body(captured[0]) == {"host": "links.x.com"}
+    assert status.data is not None
+    assert status.data.target == "track.coffeemail.com.br"
+    assert status.data.verified_at is None
+    invalid = _client([], *_error("INVALID_TRACKING_HOST", 400)).domains.set_tracking_domain(
+        "d1", "outro.com"
+    )
+    assert isinstance(invalid.error, ValidationError)
+    assert invalid.error.api_code == "INVALID_TRACKING_HOST"
+    disabled = _client([], *_error("TRACKING_DOMAINS_DISABLED", 409)).domains.set_tracking_domain(
+        "d1", "links.x.com"
+    )
+    assert isinstance(disabled.error, ConflictError)
+    assert disabled.error.api_code == "TRACKING_DOMAINS_DISABLED"
+    missing = _client([], *_error("DOMAIN_NOT_FOUND", 404)).domains.set_tracking_domain(
+        "x", "links.x.com"
+    )
+    assert isinstance(missing.error, NotFoundError)
+
+
+def test_remove_tracking_domain_returns_previous_host_or_none() -> None:
+    captured: list[httpx.Request] = []
+    removed = _client(captured, _TRACKING).domains.remove_tracking_domain("d1")
+    assert captured[0].method == "DELETE"
+    assert captured[0].url.path == "/v1/product/domains/d1/tracking-domain"
+    assert removed.data is not None
+    assert removed.data.host == "links.x.com"
+    assert _client([], None).domains.remove_tracking_domain("d1").data is None
+    missing = _client([], *_error("DOMAIN_NOT_FOUND", 404)).domains.remove_tracking_domain("x")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.data is None
+
+
+async def test_async_domains_deliverability_operations() -> None:
+    captured: list[httpx.Request] = []
+    responses: dict[tuple[str, str], object] = {
+        ("POST", "/v1/product/domains/d1/dkim/rotate"): _ROTATION,
+        ("PUT", "/v1/product/domains/d1/tracking-domain"): _TRACKING,
+        ("DELETE", "/v1/product/domains/d1/tracking-domain"): None,
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=responses[(request.method, request.url.path)])
+
+    client = AsyncCoffeeMail(
+        "cm_test_x", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    rotation = await client.domains.rotate_dkim("d1")
+    tracking = await client.domains.set_tracking_domain("d1", "links.x.com")
+    removed = await client.domains.remove_tracking_domain("d1")
+    assert rotation.data is not None
+    assert rotation.data.selector == "cm2"
+    assert tracking.data is not None
+    assert tracking.data.host == "links.x.com"
+    assert _body(captured[1]) == {"host": "links.x.com"}
+    assert removed.error is None
+    assert removed.data is None

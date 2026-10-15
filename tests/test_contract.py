@@ -149,6 +149,11 @@ CALLS: dict[str, Call] = {
     "domains.delete": lambda c: c.domains.delete(UUID_A),
     "domains.get_health": lambda c: c.domains.get_health(UUID_A),
     "domains.get_warmup_status": lambda c: c.domains.get_warmup_status(UUID_A),
+    "domains.rotate_dkim": lambda c: c.domains.rotate_dkim(UUID_A),
+    "domains.set_tracking_domain": lambda c: c.domains.set_tracking_domain(
+        UUID_A, "links.exemplo.com.br"
+    ),
+    "domains.remove_tracking_domain": lambda c: c.domains.remove_tracking_domain(UUID_A),
     "templates.create": lambda c: c.templates.create(
         "Boas-vindas",
         "<p>{{nome}}</p>",
@@ -194,6 +199,7 @@ CALLS: dict[str, Call] = {
     "senders.create_sem_nome": lambda c: c.senders.create("ana@exemplo.com.br"),
     "senders.list": lambda c: c.senders.list(),
     "senders.verify": lambda c: c.senders.verify(UUID_A),
+    "senders.resend_verification": lambda c: c.senders.resend_verification(UUID_A),
     "senders.delete": lambda c: c.senders.delete(UUID_A),
     "suppressions.create": lambda c: c.suppressions.create("x@gmail.com", "bounce"),
     "suppressions.list": lambda c: c.suppressions.list(limit=50, category="bounce"),

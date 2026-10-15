@@ -19,6 +19,8 @@ from coffeemail.models.broadcasts import (
 )
 from coffeemail.models.domains import (
     CreateDomainResponse,
+    CustomHostStatus,
+    DkimRotation,
     DnsRecord,
     DnsResolution,
     DomainCheckName,
@@ -32,6 +34,7 @@ from coffeemail.models.domains import (
     HealthCheck,
     ListDomainsResponse,
     SendingIdentity,
+    WarmupStatus,
 )
 from coffeemail.models.emails import (
     ApiKeyRef,
@@ -117,9 +120,11 @@ __all__ = [
     "ContactDetail",
     "ContactInput",
     "CreateDomainResponse",
+    "CustomHostStatus",
     "CreateSuppressionReason",
     "CreatedSender",
     "CreatedWebhookDetail",
+    "DkimRotation",
     "DnsRecord",
     "DnsResolution",
     "DomainCheckName",
@@ -183,6 +188,7 @@ __all__ = [
     "ToggleWebhookResult",
     "UpdateResult",
     "VerifySenderResult",
+    "WarmupStatus",
     "WebhookDelivery",
     "WebhookDeliveryStatus",
     "WebhookDetail",

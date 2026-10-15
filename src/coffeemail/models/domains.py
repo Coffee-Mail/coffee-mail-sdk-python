@@ -7,6 +7,7 @@ DomainStatusReason = Literal["dns_records_missing", "provider_pending", "provide
 DnsResolution = Literal["found", "absent", "unknown"]
 DomainCheckName = Literal["spf", "dkim", "dmarc", "ownership", "infrastructureSpf"]
 DomainHealthStatus = Literal["healthy", "warning", "critical"]
+WarmupStatus = Literal["warming", "completed"]
 
 
 class DnsRecord(BaseModel):
@@ -39,6 +40,29 @@ class DomainDnsCheck(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class DkimRotation(BaseModel):
+    """Rotação de DKIM pendente: a chave em uso só muda quando o TXT do novo seletor propagar."""
+
+    domain_id: str = Field(alias="domainId")
+    selector: str
+    started_at: str = Field(alias="startedAt")
+    record: DnsRecord
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CustomHostStatus(BaseModel):
+    """Host próprio (return-path ou tracking) que aponta, via CNAME, para a plataforma."""
+
+    host: str
+    target: str
+    verified: bool = False
+    verified_at: str | None = Field(default=None, alias="verifiedAt")
+    record: DnsRecord
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class DomainDetail(BaseModel):
     """Domínio. ``checks`` e ``required_checks`` só vêm na resposta de ``verify``."""
 
@@ -59,6 +83,10 @@ class DomainDetail(BaseModel):
         default_factory=list, alias="dnsRecordsToPublish"
     )
     created_at: str | None = Field(default=None, alias="createdAt")
+    dkim_rotation: DkimRotation | None = Field(default=None, alias="dkimRotation")
+    return_path: CustomHostStatus | None = Field(default=None, alias="returnPath")
+    tracking_domain: CustomHostStatus | None = Field(default=None, alias="trackingDomain")
+    tracking_domains_available: bool = Field(default=False, alias="trackingDomainsAvailable")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -98,7 +126,13 @@ class DomainHealthResponse(BaseModel):
 
 
 class DomainWarmupStatus(BaseModel):
+    """Aquecimento do domínio. ``status`` é ``completed`` quando a rampa terminou."""
+
     domain_id: str = Field(alias="domainId")
+    status: WarmupStatus | str | None = None
+    total_days: int | None = Field(default=None, alias="totalDays")
+    started_at: str | None = Field(default=None, alias="startedAt")
+    completed_at: str | None = Field(default=None, alias="completedAt")
     current_day: int = Field(default=0, alias="currentDay")
     daily_quota: int = Field(default=0, alias="dailyQuota")
     sent_today: int = Field(default=0, alias="sentToday")
