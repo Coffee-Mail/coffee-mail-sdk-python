@@ -94,3 +94,7 @@ class WebhookDelivery(BaseModel):
 
 class ListWebhookDeliveriesResponse(BaseModel):
     deliveries: list[WebhookDelivery] = Field(default_factory=list)
+
+
+class WebhookDeliveryDetail(WebhookDelivery):
+    request_payload: str = Field(alias="requestPayload")

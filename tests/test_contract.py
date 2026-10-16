@@ -130,9 +130,20 @@ EMAIL = SendEmailPayload(
     sandbox=True,
 )
 
+TEMPLATE_EMAIL = SendEmailPayload(
+    from_address="no-reply@exemplo.com.br",
+    to="cliente@gmail.com",
+    template_id="boas-vindas",
+    variables={"nome": "Ana"},
+)
+
 CALLS: dict[str, Call] = {
     "introspect": lambda c: c.introspect(force_refresh=True),
     "emails.send": lambda c: c.emails.send(EMAIL),
+    "emails.send_template_alias": lambda c: c.emails.send(TEMPLATE_EMAIL),
+    "emails.send_template_id": lambda c: c.emails.send(
+        TEMPLATE_EMAIL.model_copy(update={"template_id": UUID_A})
+    ),
     "emails.send_batch": lambda c: c.emails.send_batch([EMAIL]),
     "emails.list": lambda c: c.emails.list(
         limit=10, status="delivered", tag="fluxo", from_date="2026-10-01T00:00:00Z"
@@ -172,6 +183,9 @@ CALLS: dict[str, Call] = {
     "templates.test_send": lambda c: c.templates.test_send(
         UUID_A, "teste@gmail.com", from_email="no-reply@exemplo.com.br"
     ),
+    "templates.list_versions": lambda c: c.templates.list_versions(UUID_A, limit=10, offset=20),
+    "templates.get_version": lambda c: c.templates.get_version(UUID_A, 3),
+    "templates.restore_version": lambda c: c.templates.restore_version(UUID_A, 3),
     "audiences.create": lambda c: c.audiences.create("Clientes", description="Todos"),
     "audiences.list": lambda c: c.audiences.list(limit=20, offset=40),
     "audiences.get": lambda c: c.audiences.get(UUID_A),
@@ -219,7 +233,10 @@ CALLS: dict[str, Call] = {
     "webhooks.list_deliveries": lambda c: c.webhooks.list_deliveries(
         UUID_A, status="failed", limit=5
     ),
+    "webhooks.get_delivery": lambda c: c.webhooks.get_delivery(UUID_A, UUID_B),
+    "webhooks.replay_delivery": lambda c: c.webhooks.replay_delivery(UUID_A, UUID_B),
     "webhooks.test": lambda c: c.webhooks.test(UUID_A),
+    "validation.validate": lambda c: c.validation.validate(["ana@gmail.com", " bia@x.com "]),
     "stats.get": lambda c: c.stats.get(
         start_date="2026-10-01", end_date="2026-10-14", granularity="day", email_type="all"
     ),

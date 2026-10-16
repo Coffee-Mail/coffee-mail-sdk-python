@@ -287,7 +287,7 @@ O resultado fica em cache por 300 segundos por instância de cliente. `ApiKeyInt
 | `cancel(email_id)` | `dict` | `POST /v1/product/emails/{id}/cancel` |
 | `resend(email_id)` | `SendEmailResponse` | `POST /v1/product/emails/{id}/resend` |
 
-Campos de `SendEmailPayload` (ou chaves do dicionário): `from`, `to`, `subject`, `html`, `text`, `cc`, `bcc`, `replyTo`, `headers`, `attachments`, `tags`, `templateId`, `variables`, `emailType`, `suppressionCategory`, `scheduledAt` e `metadata`, além de `idempotency_key` e `sandbox`, que viram headers. Anexos (`EmailAttachment` ou dicionário com `filename`, `content`, `contentType`, `disposition`, `cid`) aceitam em `content` bytes (codificados em base64 pelo SDK), o caminho de um arquivo existente ou uma string já em base64. Em `send_batch`, o lote usa um único conjunto de headers (vale a última `idempotency_key` informada).
+Campos de `SendEmailPayload` (ou chaves do dicionário): `from`, `to`, `subject`, `html`, `text`, `cc`, `bcc`, `replyTo`, `headers`, `attachments`, `tags`, `templateId` (id **ou** alias do template), `variables`, `emailType`, `suppressionCategory`, `scheduledAt` e `metadata`, além de `idempotency_key` e `sandbox`, que viram headers. Anexos (`EmailAttachment` ou dicionário com `filename`, `content`, `contentType`, `disposition`, `cid`) aceitam em `content` bytes (codificados em base64 pelo SDK), o caminho de um arquivo existente ou uma string já em base64. Em `send_batch`, o lote usa um único conjunto de headers (vale a última `idempotency_key` informada).
 
 ```python
 from coffeemail import EmailAttachment, SendEmailPayload
@@ -358,6 +358,9 @@ print(tracking.record.type, tracking.record.host, tracking.record.value, trackin
 | `format(html, *, format=None)` | `FormatTemplateResponse` | `POST /v1/product/templates/format` |
 | `test_render(html, *, format=None, variables=None)` | `TestRenderTemplateResponse` | `POST /v1/product/templates/test-render` |
 | `test_send(template_id, to, *, from_email, subject, variables)` | `TestSendResult` | `POST /v1/product/templates/{id}/test-send` |
+| `list_versions(template_id, *, limit=None, offset=None)` | `ListTemplateVersionsResponse` (`data`, `total`) | `GET /v1/product/templates/{id}/versions` |
+| `get_version(template_id, version)` | `TemplateVersionDetail` | `GET /v1/product/templates/{id}/versions/{version}` |
+| `restore_version(template_id, version)` | `TemplateDetail` | `POST /v1/product/templates/{id}/versions/{version}/restore` |
 
 ```python
 template = client.templates.create(
@@ -369,7 +372,12 @@ template = client.templates.create(
 
 preview = client.templates.preview_by_id(template.id, {"nome": "Ana"}).unwrap()
 print(preview.html)
+
+versions = client.templates.list_versions(template.id, limit=10).unwrap()
+restored = client.templates.restore_version(template.id, versions.data[-1].version).unwrap()
 ```
+
+Cada alteração do template grava uma versão (`version` crescente a partir de 1; `list_versions` vem da mais recente para a mais antiga, com `limit` de 1 a 100). `restore_version` copia o conteúdo da versão para o template e gera uma versão nova. Erros: `NotFoundError` com `api_code="TEMPLATE_NOT_FOUND"` ou `"TEMPLATE_VERSION_NOT_FOUND"`.
 
 ### Audiences — `client.audiences`
 
@@ -459,10 +467,31 @@ Na criação, `reason` aceita `manual`, `bounce` ou `complaint`. A rota usa o **
 | `delete(webhook_id)` | `dict` | `DELETE /v1/product/webhooks/{id}` |
 | `rotate_secret(webhook_id)` | `RotateWebhookSecretResult` | `POST /v1/product/webhooks/{id}/rotate-secret` |
 | `list_deliveries(webhook_id, *, event_type, status, from_date, to_date, limit)` | `ListWebhookDeliveriesResponse` | `GET /v1/product/webhooks/{id}/deliveries` |
+| `get_delivery(webhook_id, delivery_id)` | `WebhookDeliveryDetail` | `GET /v1/product/webhooks/{id}/deliveries/{deliveryId}` |
+| `replay_delivery(webhook_id, delivery_id)` | `WebhookDeliveryDetail` | `POST /v1/product/webhooks/{id}/deliveries/{deliveryId}/replay` |
 | `test(webhook_id)` | `TestWebhookResult` | `POST /v1/product/webhooks/{id}/test` |
 | `verify_signature(payload, secret, *, headers, ...)` (estático) | `bool` | — (ver [Webhooks](#-webhooks)) |
 
 O segredo (`secret`) só aparece em `CreatedWebhookDetail` e `RotateWebhookSecretResult`; guarde-o na hora.
+
+`WebhookDeliveryDetail` acrescenta a `WebhookDelivery` o corpo enviado (`request_payload`). `replay_delivery` reenfileira o mesmo corpo como uma entrega nova (HTTP 202, `status="pending"`). Erros: `NotFoundError` (`api_code="WEBHOOK_NOT_FOUND"` ou `"WEBHOOK_DELIVERY_NOT_FOUND"`) e `ConflictError` (`api_code="WEBHOOK_DELIVERY_PENDING"` quando a entrega original ainda está pendente, `"WEBHOOK_NOT_ACTIVE"` quando o webhook não está ativo).
+
+### Validation — `client.validation`
+
+| Método | Retorno | Endpoint |
+| --- | --- | --- |
+| `validate(emails: list[str])` | `ValidateEmailsResponse` | `POST /v1/product/validate` |
+
+Valida de 1 a 100 endereços por chamada: formato, MX e domínio descartável. `ValidateEmailsResponse` traz `items` (`EmailValidationResult`: `email`, `format_valid`, `mx_valid`, `is_disposable`, `reason` opcional), `valid_count`, `invalid_count` e `credits` (`ValidationCredits`: `limit`, `used`, `remaining`; `limit` e `remaining` são `None` em plano ilimitado, veja `credits.unlimited`).
+
+```python
+result = client.validation.validate(["ana@gmail.com", "teste@mailinator.com"]).unwrap()
+for item in result.items:
+    print(item.email, item.format_valid, item.mx_valid, item.is_disposable, item.reason)
+print(f"Créditos restantes: {result.credits.remaining}")
+```
+
+Cada endereço consome um crédito do mês. Créditos esgotados respondem `RateLimitError` com `api_code="VALIDATION_CREDITS_EXHAUSTED"`: não é limite de taxa passageiro, então não repita a chamada até a virada do mês ou a troca de plano. O SDK não faz retry automático.
 
 ### Stats — `client.stats`
 
@@ -573,7 +602,7 @@ coffee-mail-sdk-python/
 │   │   └── i18n.py          # mensagens pt-BR / en
 │   ├── models/              # modelos Pydantic por recurso
 │   ├── resources/           # emails, domains, templates, audiences, broadcasts,
-│   │                        # senders, suppressions, webhooks, stats (sync + async)
+│   │                        # senders, suppressions, webhooks, validation, stats (sync + async)
 │   └── py.typed
 ├── tests/                   # pytest; fixtures/webhook_vectors.json; test_contract.py
 ├── spec/product.json        # snapshot do OpenAPI de produto

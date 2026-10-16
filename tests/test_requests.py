@@ -8,6 +8,7 @@ from coffeemail import (
     CoffeeMail,
     ConflictError,
     NotFoundError,
+    RateLimitError,
     SendEmailPayload,
     ValidationError,
 )
@@ -512,3 +513,242 @@ async def test_async_domains_deliverability_operations() -> None:
     assert _body(captured[1]) == {"host": "links.x.com"}
     assert removed.error is None
     assert removed.data is None
+
+
+_VERSION_SUMMARY = {
+    "version": 2,
+    "name": "Boas-vindas",
+    "subject": None,
+    "createdBy": None,
+    "createdAt": "2026-10-15T10:00:00.000Z",
+}
+_VERSION_DETAIL = {
+    **_VERSION_SUMMARY,
+    "templateId": "t1",
+    "preheader": None,
+    "html": "<p>{{nome}}</p>",
+    "contentJson": None,
+    "textPayload": None,
+    "variables": [{"name": "nome"}],
+    "format": "react",
+    "sourceLocale": "en",
+}
+_TEMPLATE = {"id": "t1", "name": "Boas-vindas", "html": "<p>x</p>", "createdAt": "2026-10-15"}
+_DELIVERY = {
+    "id": "dl2",
+    "webhookId": "w1",
+    "emailEventId": None,
+    "eventType": "email.delivered",
+    "responseStatus": None,
+    "responseBody": None,
+    "attempts": 0,
+    "lastError": None,
+    "status": "pending",
+    "nextRunAt": "2026-10-15T10:00:00.000Z",
+    "createdAt": "2026-10-15T10:00:00.000Z",
+    "requestPayload": '{"event_type":"email.delivered"}',
+}
+_VALIDATION = {
+    "items": [
+        {"email": "ana@gmail.com", "formatValid": True, "mxValid": True, "isDisposable": False},
+        {
+            "email": "x@mailinator.com",
+            "formatValid": True,
+            "mxValid": True,
+            "isDisposable": True,
+            "reason": "disposable",
+        },
+    ],
+    "validCount": 1,
+    "invalidCount": 1,
+    "credits": {"limit": 1000, "used": 2, "remaining": 998},
+}
+
+
+def test_list_versions_sends_pagination_and_parses_page() -> None:
+    captured: list[httpx.Request] = []
+    body = {"data": [_VERSION_SUMMARY], "total": 7}
+    page = _client(captured, body).templates.list_versions("t1", limit=5, offset=10)
+    assert captured[0].method == "GET"
+    assert captured[0].url.path == "/v1/product/templates/t1/versions"
+    assert dict(captured[0].url.params) == {"limit": "5", "offset": "10"}
+    assert page.data is not None
+    assert page.data.total == 7
+    assert page.data.versions[0].version == 2
+    assert page.data.versions[0].subject is None
+    assert page.data.versions[0].created_by is None
+    _client(captured).templates.list_versions("t1")
+    assert not captured[1].url.params
+    missing = _client([], *_error("TEMPLATE_NOT_FOUND", 404)).templates.list_versions("x")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "TEMPLATE_NOT_FOUND"
+
+
+def test_get_version_parses_detail_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    detail = _client(captured, _VERSION_DETAIL).templates.get_version("t1", 2)
+    assert captured[0].url.path == "/v1/product/templates/t1/versions/2"
+    assert detail.data is not None
+    assert detail.data.template_id == "t1"
+    assert detail.data.format == "react"
+    assert detail.data.source_locale == "en"
+    assert detail.data.variables[0].name == "nome"
+    gone = _client([], *_error("TEMPLATE_VERSION_NOT_FOUND", 404)).templates.get_version("t1", 9)
+    assert isinstance(gone.error, NotFoundError)
+    assert gone.error.api_code == "TEMPLATE_VERSION_NOT_FOUND"
+    missing = _client([], *_error("TEMPLATE_NOT_FOUND", 404)).templates.get_version("x", 1)
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "TEMPLATE_NOT_FOUND"
+
+
+def test_restore_version_posts_without_body_and_returns_template() -> None:
+    captured: list[httpx.Request] = []
+    restored = _client(captured, _TEMPLATE).templates.restore_version("t1", 2)
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/templates/t1/versions/2/restore"
+    assert captured[0].content == b""
+    assert "content-type" not in captured[0].headers
+    assert restored.data is not None
+    assert restored.data.id == "t1"
+    gone = _client([], *_error("TEMPLATE_VERSION_NOT_FOUND", 404)).templates.restore_version(
+        "t1", 9
+    )
+    assert isinstance(gone.error, NotFoundError)
+    assert gone.error.api_code == "TEMPLATE_VERSION_NOT_FOUND"
+
+
+def test_send_accepts_template_alias() -> None:
+    captured: list[httpx.Request] = []
+    payload = SendEmailPayload(
+        from_address="a@x.com", to="b@y.com", template_id="boas-vindas", variables={"nome": "Ana"}
+    )
+    _client(captured, {"id": "e1"}).emails.send(payload)
+    assert _body(captured[0])["templateId"] == "boas-vindas"
+
+
+def test_validate_sends_emails_and_parses_items_and_credits() -> None:
+    captured: list[httpx.Request] = []
+    result = _client(captured, _VALIDATION).validation.validate([" ana@gmail.com ", "x@x.com"])
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/validate"
+    assert _body(captured[0]) == {"emails": ["ana@gmail.com", "x@x.com"]}
+    assert result.data is not None
+    assert result.data.valid_count == 1
+    assert result.data.invalid_count == 1
+    assert result.data.items[0].reason is None
+    assert result.data.items[1].is_disposable is True
+    assert result.data.items[1].reason == "disposable"
+    assert result.data.credits.remaining == 998
+    assert result.data.credits.unlimited is False
+    unlimited = {**_VALIDATION, "credits": {"limit": None, "used": 5, "remaining": None}}
+    open_plan = _client([], unlimited).validation.validate(["ana@gmail.com"])
+    assert open_plan.data is not None
+    assert open_plan.data.credits.unlimited is True
+    assert open_plan.data.credits.remaining is None
+
+
+def test_validate_credits_exhausted_is_rate_limit_without_retry() -> None:
+    captured: list[httpx.Request] = []
+    client = _client(captured, *_error("VALIDATION_CREDITS_EXHAUSTED", 429))
+    exhausted = client.validation.validate(["ana@gmail.com"])
+    assert len(captured) == 1
+    assert isinstance(exhausted.error, RateLimitError)
+    assert exhausted.error.api_code == "VALIDATION_CREDITS_EXHAUSTED"
+    assert exhausted.data is None
+    invalid = _client([], *_error("VALIDATION_ERROR", 400)).validation.validate([])
+    assert isinstance(invalid.error, ValidationError)
+
+
+async def test_async_validate_credits_exhausted_without_retry() -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        body, status = _error("VALIDATION_CREDITS_EXHAUSTED", 429)
+        return httpx.Response(status, json=body, headers={"retry-after": "60"})
+
+    client = AsyncCoffeeMail(
+        "cm_test_x", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    exhausted = await client.validation.validate(["ana@gmail.com"])
+    assert len(captured) == 1
+    assert isinstance(exhausted.error, RateLimitError)
+    assert exhausted.error.api_code == "VALIDATION_CREDITS_EXHAUSTED"
+
+
+def test_get_delivery_exposes_request_payload_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    delivery = _client(captured, {**_DELIVERY, "status": "failed"}).webhooks.get_delivery(
+        "w1", "dl1"
+    )
+    assert captured[0].method == "GET"
+    assert captured[0].url.path == "/v1/product/webhooks/w1/deliveries/dl1"
+    assert delivery.data is not None
+    assert delivery.data.request_payload == '{"event_type":"email.delivered"}'
+    assert delivery.data.status == "failed"
+    gone = _client([], *_error("WEBHOOK_DELIVERY_NOT_FOUND", 404)).webhooks.get_delivery("w1", "x")
+    assert isinstance(gone.error, NotFoundError)
+    assert gone.error.api_code == "WEBHOOK_DELIVERY_NOT_FOUND"
+    missing = _client([], *_error("WEBHOOK_NOT_FOUND", 404)).webhooks.get_delivery("x", "dl1")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "WEBHOOK_NOT_FOUND"
+
+
+def test_replay_delivery_posts_without_body_and_types_conflicts() -> None:
+    captured: list[httpx.Request] = []
+    replay = _client(captured, _DELIVERY, 202).webhooks.replay_delivery("w1", "dl1")
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/webhooks/w1/deliveries/dl1/replay"
+    assert captured[0].content == b""
+    assert replay.status_code == 202
+    assert replay.data is not None
+    assert replay.data.id == "dl2"
+    assert replay.data.status == "pending"
+    for code in ("WEBHOOK_DELIVERY_PENDING", "WEBHOOK_NOT_ACTIVE"):
+        conflict = _client([], *_error(code, 409)).webhooks.replay_delivery("w1", "dl1")
+        assert isinstance(conflict.error, ConflictError)
+        assert conflict.error.api_code == code
+    gone = _client([], *_error("WEBHOOK_DELIVERY_NOT_FOUND", 404)).webhooks.replay_delivery(
+        "w1", "x"
+    )
+    assert isinstance(gone.error, NotFoundError)
+
+
+async def test_async_versions_and_deliveries() -> None:
+    captured: list[httpx.Request] = []
+    responses: dict[tuple[str, str], tuple[int, object]] = {
+        ("GET", "/v1/product/templates/t1/versions"): (200, {"data": [], "total": 0}),
+        ("GET", "/v1/product/templates/t1/versions/2"): (200, _VERSION_DETAIL),
+        ("POST", "/v1/product/templates/t1/versions/2/restore"): (200, _TEMPLATE),
+        ("GET", "/v1/product/webhooks/w1/deliveries/dl1"): (200, _DELIVERY),
+        ("POST", "/v1/product/webhooks/w1/deliveries/dl1/replay"): (202, _DELIVERY),
+        ("POST", "/v1/product/validate"): (200, _VALIDATION),
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        status, body = responses[(request.method, request.url.path)]
+        return httpx.Response(status, json=body)
+
+    client = AsyncCoffeeMail(
+        "cm_test_x", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    versions = await client.templates.list_versions("t1", limit=1)
+    version = await client.templates.get_version("t1", 2)
+    restored = await client.templates.restore_version("t1", 2)
+    delivery = await client.webhooks.get_delivery("w1", "dl1")
+    replay = await client.webhooks.replay_delivery("w1", "dl1")
+    validated = await client.validation.validate(["ana@gmail.com"])
+    assert versions.data is not None
+    assert versions.data.total == 0
+    assert dict(captured[0].url.params) == {"limit": "1"}
+    assert version.data is not None
+    assert version.data.html == "<p>{{nome}}</p>"
+    assert restored.data is not None
+    assert restored.data.name == "Boas-vindas"
+    assert delivery.data is not None
+    assert delivery.data.request_payload.startswith("{")
+    assert replay.status_code == 202
+    assert validated.data is not None
+    assert validated.data.credits.used == 2
+    assert _body(captured[-1]) == {"emails": ["ana@gmail.com"]}

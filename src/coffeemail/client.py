@@ -13,6 +13,7 @@ from coffeemail.resources.senders import Senders
 from coffeemail.resources.stats import Stats
 from coffeemail.resources.suppressions import Suppressions
 from coffeemail.resources.templates import Templates
+from coffeemail.resources.validation import Validation
 from coffeemail.resources.webhooks import Webhooks
 
 
@@ -42,6 +43,7 @@ class CoffeeMail:
         self.suppressions = Suppressions(self._transport)
         self.webhooks = Webhooks(self._transport)
         self.stats = Stats(self._transport)
+        self.validation = Validation(self._transport)
 
     def introspect(self, force_refresh: bool = False) -> CoffeeMailResponse[ApiKeyIntrospection]:
         return self._transport.introspect(force_refresh=force_refresh)

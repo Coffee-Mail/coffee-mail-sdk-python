@@ -13,6 +13,7 @@ from coffeemail.resources.senders import AsyncSenders
 from coffeemail.resources.stats import AsyncStats
 from coffeemail.resources.suppressions import AsyncSuppressions
 from coffeemail.resources.templates import AsyncTemplates
+from coffeemail.resources.validation import AsyncValidation
 from coffeemail.resources.webhooks import AsyncWebhooks
 
 
@@ -42,6 +43,7 @@ class AsyncCoffeeMail:
         self.suppressions = AsyncSuppressions(self._transport)
         self.webhooks = AsyncWebhooks(self._transport)
         self.stats = AsyncStats(self._transport)
+        self.validation = AsyncValidation(self._transport)
 
     async def introspect(
         self, force_refresh: bool = False
