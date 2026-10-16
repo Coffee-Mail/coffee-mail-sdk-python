@@ -71,3 +71,35 @@ class TestRenderTemplateResponse(BaseModel):
     sanitize_report: SanitizeReport = Field(default_factory=SanitizeReport, alias="sanitizeReport")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class TemplateVersionSummary(BaseModel):
+    version: int
+    name: str
+    subject: str | None = None
+    created_by: str | None = Field(default=None, alias="createdBy")
+    created_at: str = Field(alias="createdAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ListTemplateVersionsResponse(BaseModel):
+    data: list[TemplateVersionSummary] = Field(default_factory=list)
+    total: int = 0
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @property
+    def versions(self) -> list[TemplateVersionSummary]:
+        return self.data
+
+
+class TemplateVersionDetail(TemplateVersionSummary):
+    template_id: str = Field(alias="templateId")
+    preheader: str | None = None
+    html: str
+    content_json: dict[str, object] | None = Field(default=None, alias="contentJson")
+    text_payload: str | None = Field(default=None, alias="textPayload")
+    variables: list[TemplateVariable] = Field(default_factory=list)
+    format: TemplateFormat | str = "html"
+    source_locale: TemplateLocale | str | None = Field(default=None, alias="sourceLocale")

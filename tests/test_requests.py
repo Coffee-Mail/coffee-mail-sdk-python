@@ -3,7 +3,15 @@ import json
 import httpx
 import pytest
 
-from coffeemail import AsyncCoffeeMail, CoffeeMail, SendEmailPayload
+from coffeemail import (
+    AsyncCoffeeMail,
+    CoffeeMail,
+    ConflictError,
+    NotFoundError,
+    RateLimitError,
+    SendEmailPayload,
+    ValidationError,
+)
 from coffeemail.core.http import SDK_VERSION
 
 _EMPTY: dict[str, object] = {}
@@ -345,3 +353,402 @@ def test_contact_subscribed_flag() -> None:
     page = _client([], body).audiences.contacts.list("aud-1")
     assert page.data is not None
     assert [c.subscribed for c in page.data.contacts] == [False, True]
+
+
+_DNS_TXT = {"type": "TXT", "host": "cm2._domainkey.x.com", "value": "v=DKIM1; p=abc", "ttl": 3600}
+_ROTATION = {
+    "domainId": "d1",
+    "selector": "cm2",
+    "startedAt": "2026-10-15T10:00:00.000Z",
+    "record": _DNS_TXT,
+}
+_TRACKING = {
+    "host": "links.x.com",
+    "target": "track.coffeemail.com.br",
+    "verified": False,
+    "verifiedAt": None,
+    "record": {"type": "CNAME", "host": "links.x.com", "value": "track.coffeemail.com.br"},
+}
+
+
+def _error(code: str, status: int) -> tuple[dict[str, object], int]:
+    return {"error": {"code": code, "message": code.lower()}}, status
+
+
+def test_warmup_exposes_status_total_days_and_dates() -> None:
+    body = {
+        "domainId": "d1",
+        "status": "completed",
+        "currentDay": 30,
+        "totalDays": 30,
+        "dailyQuota": 0,
+        "sentToday": 12,
+        "remainingToday": 0,
+        "quotaUsedPercent": 0,
+        "lastSendDate": "2026-10-15",
+        "startedAt": "2026-09-15T10:00:00.000Z",
+        "completedAt": "2026-10-15T10:00:00.000Z",
+    }
+    warmup = _client([], body).domains.get_warmup_status("d1")
+    assert warmup.data is not None
+    assert warmup.data.status == "completed"
+    assert warmup.data.total_days == 30
+    assert warmup.data.started_at == "2026-09-15T10:00:00.000Z"
+    assert warmup.data.completed_at == "2026-10-15T10:00:00.000Z"
+    warming = _client([], {"domainId": "d1", "status": "warming", "completedAt": None})
+    in_progress = warming.domains.get_warmup_status("d1")
+    assert in_progress.data is not None
+    assert in_progress.data.completed_at is None
+
+
+def test_domain_detail_exposes_rotation_return_path_and_tracking() -> None:
+    body = {
+        "id": "d1",
+        "name": "x.com",
+        "status": "verified",
+        "dkimRotation": _ROTATION,
+        "returnPath": {
+            **_TRACKING,
+            "host": "bounces.x.com",
+            "verified": True,
+            "verifiedAt": "2026-10-15T10:00:00.000Z",
+        },
+        "trackingDomain": _TRACKING,
+        "trackingDomainsAvailable": True,
+    }
+    detail = _client([], body).domains.get("d1")
+    assert detail.data is not None
+    assert detail.data.dkim_rotation is not None
+    assert detail.data.dkim_rotation.selector == "cm2"
+    assert detail.data.dkim_rotation.record.ttl == 3600
+    assert detail.data.return_path is not None
+    assert detail.data.return_path.verified is True
+    assert detail.data.tracking_domain is not None
+    assert detail.data.tracking_domain.record.type == "CNAME"
+    assert detail.data.tracking_domains_available is True
+    legacy = _client([], {"id": "d1", "name": "x.com", "status": "pending"}).domains.get("d1")
+    assert legacy.data is not None
+    assert legacy.data.dkim_rotation is None
+    assert legacy.data.return_path is None
+    assert legacy.data.tracking_domain is None
+    assert legacy.data.tracking_domains_available is False
+
+
+def test_rotate_dkim_hits_the_route_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    rotation = _client(captured, _ROTATION).domains.rotate_dkim("d1")
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/domains/d1/dkim/rotate"
+    assert captured[0].content == b""
+    assert rotation.data is not None
+    assert rotation.data.record.host == "cm2._domainkey.x.com"
+    missing = _client([], *_error("DOMAIN_NOT_FOUND", 404)).domains.rotate_dkim("x")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "DOMAIN_NOT_FOUND"
+    pending = _client([], *_error("DOMAIN_NOT_VERIFIED", 409)).domains.rotate_dkim("d1")
+    assert isinstance(pending.error, ConflictError)
+    assert pending.error.api_code == "DOMAIN_NOT_VERIFIED"
+
+
+def test_set_tracking_domain_sends_host_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    status = _client(captured, _TRACKING).domains.set_tracking_domain("d1", " links.x.com ")
+    assert captured[0].method == "PUT"
+    assert captured[0].url.path == "/v1/product/domains/d1/tracking-domain"
+    assert _body(captured[0]) == {"host": "links.x.com"}
+    assert status.data is not None
+    assert status.data.target == "track.coffeemail.com.br"
+    assert status.data.verified_at is None
+    invalid = _client([], *_error("INVALID_TRACKING_HOST", 400)).domains.set_tracking_domain(
+        "d1", "outro.com"
+    )
+    assert isinstance(invalid.error, ValidationError)
+    assert invalid.error.api_code == "INVALID_TRACKING_HOST"
+    disabled = _client([], *_error("TRACKING_DOMAINS_DISABLED", 409)).domains.set_tracking_domain(
+        "d1", "links.x.com"
+    )
+    assert isinstance(disabled.error, ConflictError)
+    assert disabled.error.api_code == "TRACKING_DOMAINS_DISABLED"
+    missing = _client([], *_error("DOMAIN_NOT_FOUND", 404)).domains.set_tracking_domain(
+        "x", "links.x.com"
+    )
+    assert isinstance(missing.error, NotFoundError)
+
+
+def test_remove_tracking_domain_returns_previous_host_or_none() -> None:
+    captured: list[httpx.Request] = []
+    removed = _client(captured, _TRACKING).domains.remove_tracking_domain("d1")
+    assert captured[0].method == "DELETE"
+    assert captured[0].url.path == "/v1/product/domains/d1/tracking-domain"
+    assert removed.data is not None
+    assert removed.data.host == "links.x.com"
+    assert _client([], None).domains.remove_tracking_domain("d1").data is None
+    missing = _client([], *_error("DOMAIN_NOT_FOUND", 404)).domains.remove_tracking_domain("x")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.data is None
+
+
+async def test_async_domains_deliverability_operations() -> None:
+    captured: list[httpx.Request] = []
+    responses: dict[tuple[str, str], object] = {
+        ("POST", "/v1/product/domains/d1/dkim/rotate"): _ROTATION,
+        ("PUT", "/v1/product/domains/d1/tracking-domain"): _TRACKING,
+        ("DELETE", "/v1/product/domains/d1/tracking-domain"): None,
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=responses[(request.method, request.url.path)])
+
+    client = AsyncCoffeeMail(
+        "cm_test_x", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    rotation = await client.domains.rotate_dkim("d1")
+    tracking = await client.domains.set_tracking_domain("d1", "links.x.com")
+    removed = await client.domains.remove_tracking_domain("d1")
+    assert rotation.data is not None
+    assert rotation.data.selector == "cm2"
+    assert tracking.data is not None
+    assert tracking.data.host == "links.x.com"
+    assert _body(captured[1]) == {"host": "links.x.com"}
+    assert removed.error is None
+    assert removed.data is None
+
+
+_VERSION_SUMMARY = {
+    "version": 2,
+    "name": "Boas-vindas",
+    "subject": None,
+    "createdBy": None,
+    "createdAt": "2026-10-15T10:00:00.000Z",
+}
+_VERSION_DETAIL = {
+    **_VERSION_SUMMARY,
+    "templateId": "t1",
+    "preheader": None,
+    "html": "<p>{{nome}}</p>",
+    "contentJson": None,
+    "textPayload": None,
+    "variables": [{"name": "nome"}],
+    "format": "react",
+    "sourceLocale": "en",
+}
+_TEMPLATE = {"id": "t1", "name": "Boas-vindas", "html": "<p>x</p>", "createdAt": "2026-10-15"}
+_DELIVERY = {
+    "id": "dl2",
+    "webhookId": "w1",
+    "emailEventId": None,
+    "eventType": "email.delivered",
+    "responseStatus": None,
+    "responseBody": None,
+    "attempts": 0,
+    "lastError": None,
+    "status": "pending",
+    "nextRunAt": "2026-10-15T10:00:00.000Z",
+    "createdAt": "2026-10-15T10:00:00.000Z",
+    "requestPayload": '{"event_type":"email.delivered"}',
+}
+_VALIDATION = {
+    "items": [
+        {"email": "ana@gmail.com", "formatValid": True, "mxValid": True, "isDisposable": False},
+        {
+            "email": "x@mailinator.com",
+            "formatValid": True,
+            "mxValid": True,
+            "isDisposable": True,
+            "reason": "disposable",
+        },
+    ],
+    "validCount": 1,
+    "invalidCount": 1,
+    "credits": {"limit": 1000, "used": 2, "remaining": 998},
+}
+
+
+def test_list_versions_sends_pagination_and_parses_page() -> None:
+    captured: list[httpx.Request] = []
+    body = {"data": [_VERSION_SUMMARY], "total": 7}
+    page = _client(captured, body).templates.list_versions("t1", limit=5, offset=10)
+    assert captured[0].method == "GET"
+    assert captured[0].url.path == "/v1/product/templates/t1/versions"
+    assert dict(captured[0].url.params) == {"limit": "5", "offset": "10"}
+    assert page.data is not None
+    assert page.data.total == 7
+    assert page.data.versions[0].version == 2
+    assert page.data.versions[0].subject is None
+    assert page.data.versions[0].created_by is None
+    _client(captured).templates.list_versions("t1")
+    assert not captured[1].url.params
+    missing = _client([], *_error("TEMPLATE_NOT_FOUND", 404)).templates.list_versions("x")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "TEMPLATE_NOT_FOUND"
+
+
+def test_get_version_parses_detail_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    detail = _client(captured, _VERSION_DETAIL).templates.get_version("t1", 2)
+    assert captured[0].url.path == "/v1/product/templates/t1/versions/2"
+    assert detail.data is not None
+    assert detail.data.template_id == "t1"
+    assert detail.data.format == "react"
+    assert detail.data.source_locale == "en"
+    assert detail.data.variables[0].name == "nome"
+    gone = _client([], *_error("TEMPLATE_VERSION_NOT_FOUND", 404)).templates.get_version("t1", 9)
+    assert isinstance(gone.error, NotFoundError)
+    assert gone.error.api_code == "TEMPLATE_VERSION_NOT_FOUND"
+    missing = _client([], *_error("TEMPLATE_NOT_FOUND", 404)).templates.get_version("x", 1)
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "TEMPLATE_NOT_FOUND"
+
+
+def test_restore_version_posts_without_body_and_returns_template() -> None:
+    captured: list[httpx.Request] = []
+    restored = _client(captured, _TEMPLATE).templates.restore_version("t1", 2)
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/templates/t1/versions/2/restore"
+    assert captured[0].content == b""
+    assert "content-type" not in captured[0].headers
+    assert restored.data is not None
+    assert restored.data.id == "t1"
+    gone = _client([], *_error("TEMPLATE_VERSION_NOT_FOUND", 404)).templates.restore_version(
+        "t1", 9
+    )
+    assert isinstance(gone.error, NotFoundError)
+    assert gone.error.api_code == "TEMPLATE_VERSION_NOT_FOUND"
+
+
+def test_send_accepts_template_alias() -> None:
+    captured: list[httpx.Request] = []
+    payload = SendEmailPayload(
+        from_address="a@x.com", to="b@y.com", template_id="boas-vindas", variables={"nome": "Ana"}
+    )
+    _client(captured, {"id": "e1"}).emails.send(payload)
+    assert _body(captured[0])["templateId"] == "boas-vindas"
+
+
+def test_validate_sends_emails_and_parses_items_and_credits() -> None:
+    captured: list[httpx.Request] = []
+    result = _client(captured, _VALIDATION).validation.validate([" ana@gmail.com ", "x@x.com"])
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/validate"
+    assert _body(captured[0]) == {"emails": ["ana@gmail.com", "x@x.com"]}
+    assert result.data is not None
+    assert result.data.valid_count == 1
+    assert result.data.invalid_count == 1
+    assert result.data.items[0].reason is None
+    assert result.data.items[1].is_disposable is True
+    assert result.data.items[1].reason == "disposable"
+    assert result.data.credits.remaining == 998
+    assert result.data.credits.unlimited is False
+    unlimited = {**_VALIDATION, "credits": {"limit": None, "used": 5, "remaining": None}}
+    open_plan = _client([], unlimited).validation.validate(["ana@gmail.com"])
+    assert open_plan.data is not None
+    assert open_plan.data.credits.unlimited is True
+    assert open_plan.data.credits.remaining is None
+
+
+def test_validate_credits_exhausted_is_rate_limit_without_retry() -> None:
+    captured: list[httpx.Request] = []
+    client = _client(captured, *_error("VALIDATION_CREDITS_EXHAUSTED", 429))
+    exhausted = client.validation.validate(["ana@gmail.com"])
+    assert len(captured) == 1
+    assert isinstance(exhausted.error, RateLimitError)
+    assert exhausted.error.api_code == "VALIDATION_CREDITS_EXHAUSTED"
+    assert exhausted.data is None
+    invalid = _client([], *_error("VALIDATION_ERROR", 400)).validation.validate([])
+    assert isinstance(invalid.error, ValidationError)
+
+
+async def test_async_validate_credits_exhausted_without_retry() -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        body, status = _error("VALIDATION_CREDITS_EXHAUSTED", 429)
+        return httpx.Response(status, json=body, headers={"retry-after": "60"})
+
+    client = AsyncCoffeeMail(
+        "cm_test_x", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    exhausted = await client.validation.validate(["ana@gmail.com"])
+    assert len(captured) == 1
+    assert isinstance(exhausted.error, RateLimitError)
+    assert exhausted.error.api_code == "VALIDATION_CREDITS_EXHAUSTED"
+
+
+def test_get_delivery_exposes_request_payload_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    delivery = _client(captured, {**_DELIVERY, "status": "failed"}).webhooks.get_delivery(
+        "w1", "dl1"
+    )
+    assert captured[0].method == "GET"
+    assert captured[0].url.path == "/v1/product/webhooks/w1/deliveries/dl1"
+    assert delivery.data is not None
+    assert delivery.data.request_payload == '{"event_type":"email.delivered"}'
+    assert delivery.data.status == "failed"
+    gone = _client([], *_error("WEBHOOK_DELIVERY_NOT_FOUND", 404)).webhooks.get_delivery("w1", "x")
+    assert isinstance(gone.error, NotFoundError)
+    assert gone.error.api_code == "WEBHOOK_DELIVERY_NOT_FOUND"
+    missing = _client([], *_error("WEBHOOK_NOT_FOUND", 404)).webhooks.get_delivery("x", "dl1")
+    assert isinstance(missing.error, NotFoundError)
+    assert missing.error.api_code == "WEBHOOK_NOT_FOUND"
+
+
+def test_replay_delivery_posts_without_body_and_types_conflicts() -> None:
+    captured: list[httpx.Request] = []
+    replay = _client(captured, _DELIVERY, 202).webhooks.replay_delivery("w1", "dl1")
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/webhooks/w1/deliveries/dl1/replay"
+    assert captured[0].content == b""
+    assert replay.status_code == 202
+    assert replay.data is not None
+    assert replay.data.id == "dl2"
+    assert replay.data.status == "pending"
+    for code in ("WEBHOOK_DELIVERY_PENDING", "WEBHOOK_NOT_ACTIVE"):
+        conflict = _client([], *_error(code, 409)).webhooks.replay_delivery("w1", "dl1")
+        assert isinstance(conflict.error, ConflictError)
+        assert conflict.error.api_code == code
+    gone = _client([], *_error("WEBHOOK_DELIVERY_NOT_FOUND", 404)).webhooks.replay_delivery(
+        "w1", "x"
+    )
+    assert isinstance(gone.error, NotFoundError)
+
+
+async def test_async_versions_and_deliveries() -> None:
+    captured: list[httpx.Request] = []
+    responses: dict[tuple[str, str], tuple[int, object]] = {
+        ("GET", "/v1/product/templates/t1/versions"): (200, {"data": [], "total": 0}),
+        ("GET", "/v1/product/templates/t1/versions/2"): (200, _VERSION_DETAIL),
+        ("POST", "/v1/product/templates/t1/versions/2/restore"): (200, _TEMPLATE),
+        ("GET", "/v1/product/webhooks/w1/deliveries/dl1"): (200, _DELIVERY),
+        ("POST", "/v1/product/webhooks/w1/deliveries/dl1/replay"): (202, _DELIVERY),
+        ("POST", "/v1/product/validate"): (200, _VALIDATION),
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        status, body = responses[(request.method, request.url.path)]
+        return httpx.Response(status, json=body)
+
+    client = AsyncCoffeeMail(
+        "cm_test_x", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    versions = await client.templates.list_versions("t1", limit=1)
+    version = await client.templates.get_version("t1", 2)
+    restored = await client.templates.restore_version("t1", 2)
+    delivery = await client.webhooks.get_delivery("w1", "dl1")
+    replay = await client.webhooks.replay_delivery("w1", "dl1")
+    validated = await client.validation.validate(["ana@gmail.com"])
+    assert versions.data is not None
+    assert versions.data.total == 0
+    assert dict(captured[0].url.params) == {"limit": "1"}
+    assert version.data is not None
+    assert version.data.html == "<p>{{nome}}</p>"
+    assert restored.data is not None
+    assert restored.data.name == "Boas-vindas"
+    assert delivery.data is not None
+    assert delivery.data.request_payload.startswith("{")
+    assert replay.status_code == 202
+    assert validated.data is not None
+    assert validated.data.credits.used == 2
+    assert _body(captured[-1]) == {"emails": ["ana@gmail.com"]}

@@ -5,6 +5,7 @@ from coffeemail.resources.emails import AsyncEmails, Emails
 from coffeemail.resources.stats import AsyncStats, Stats
 from coffeemail.resources.suppressions import AsyncSuppressions, Suppressions
 from coffeemail.resources.templates import AsyncTemplates, Templates
+from coffeemail.resources.validation import AsyncValidation, Validation
 from coffeemail.resources.webhooks import AsyncWebhooks, Webhooks
 
 __all__ = [
@@ -26,4 +27,6 @@ __all__ = [
     "AsyncWebhooks",
     "Stats",
     "AsyncStats",
+    "Validation",
+    "AsyncValidation",
 ]

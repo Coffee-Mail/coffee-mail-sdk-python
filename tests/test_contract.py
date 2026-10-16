@@ -130,9 +130,20 @@ EMAIL = SendEmailPayload(
     sandbox=True,
 )
 
+TEMPLATE_EMAIL = SendEmailPayload(
+    from_address="no-reply@exemplo.com.br",
+    to="cliente@gmail.com",
+    template_id="boas-vindas",
+    variables={"nome": "Ana"},
+)
+
 CALLS: dict[str, Call] = {
     "introspect": lambda c: c.introspect(force_refresh=True),
     "emails.send": lambda c: c.emails.send(EMAIL),
+    "emails.send_template_alias": lambda c: c.emails.send(TEMPLATE_EMAIL),
+    "emails.send_template_id": lambda c: c.emails.send(
+        TEMPLATE_EMAIL.model_copy(update={"template_id": UUID_A})
+    ),
     "emails.send_batch": lambda c: c.emails.send_batch([EMAIL]),
     "emails.list": lambda c: c.emails.list(
         limit=10, status="delivered", tag="fluxo", from_date="2026-10-01T00:00:00Z"
@@ -149,6 +160,11 @@ CALLS: dict[str, Call] = {
     "domains.delete": lambda c: c.domains.delete(UUID_A),
     "domains.get_health": lambda c: c.domains.get_health(UUID_A),
     "domains.get_warmup_status": lambda c: c.domains.get_warmup_status(UUID_A),
+    "domains.rotate_dkim": lambda c: c.domains.rotate_dkim(UUID_A),
+    "domains.set_tracking_domain": lambda c: c.domains.set_tracking_domain(
+        UUID_A, "links.exemplo.com.br"
+    ),
+    "domains.remove_tracking_domain": lambda c: c.domains.remove_tracking_domain(UUID_A),
     "templates.create": lambda c: c.templates.create(
         "Boas-vindas",
         "<p>{{nome}}</p>",
@@ -167,6 +183,9 @@ CALLS: dict[str, Call] = {
     "templates.test_send": lambda c: c.templates.test_send(
         UUID_A, "teste@gmail.com", from_email="no-reply@exemplo.com.br"
     ),
+    "templates.list_versions": lambda c: c.templates.list_versions(UUID_A, limit=10, offset=20),
+    "templates.get_version": lambda c: c.templates.get_version(UUID_A, 3),
+    "templates.restore_version": lambda c: c.templates.restore_version(UUID_A, 3),
     "audiences.create": lambda c: c.audiences.create("Clientes", description="Todos"),
     "audiences.list": lambda c: c.audiences.list(limit=20, offset=40),
     "audiences.get": lambda c: c.audiences.get(UUID_A),
@@ -194,6 +213,7 @@ CALLS: dict[str, Call] = {
     "senders.create_sem_nome": lambda c: c.senders.create("ana@exemplo.com.br"),
     "senders.list": lambda c: c.senders.list(),
     "senders.verify": lambda c: c.senders.verify(UUID_A),
+    "senders.resend_verification": lambda c: c.senders.resend_verification(UUID_A),
     "senders.delete": lambda c: c.senders.delete(UUID_A),
     "suppressions.create": lambda c: c.suppressions.create("x@gmail.com", "bounce"),
     "suppressions.list": lambda c: c.suppressions.list(limit=50, category="bounce"),
@@ -213,7 +233,10 @@ CALLS: dict[str, Call] = {
     "webhooks.list_deliveries": lambda c: c.webhooks.list_deliveries(
         UUID_A, status="failed", limit=5
     ),
+    "webhooks.get_delivery": lambda c: c.webhooks.get_delivery(UUID_A, UUID_B),
+    "webhooks.replay_delivery": lambda c: c.webhooks.replay_delivery(UUID_A, UUID_B),
     "webhooks.test": lambda c: c.webhooks.test(UUID_A),
+    "validation.validate": lambda c: c.validation.validate(["ana@gmail.com", " bia@x.com "]),
     "stats.get": lambda c: c.stats.get(
         start_date="2026-10-01", end_date="2026-10-14", granularity="day", email_type="all"
     ),

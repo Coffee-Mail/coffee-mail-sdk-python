@@ -10,6 +10,17 @@ Todas as mudanças relevantes deste projeto são documentadas aqui. O formato se
 - `BroadcastDetail.metrics` (`BroadcastMetrics`, exportado) com entregues, abertos, cliques, bounces, falhas e suprimidos.
 - `senders.resend_verification(sender_id)` (sync e async) reenvia o e-mail de verificação com token novo.
 - `ContactDetail.subscribed` (`False` quando o contato se descadastrou dos broadcasts).
+- `domains.rotate_dkim(domain_id)` (sync e async): inicia a rotação da chave DKIM de um domínio verificado e devolve `DkimRotation` (seletor novo e registro TXT a publicar). Idempotente; erros `DOMAIN_NOT_FOUND` (404) e `DOMAIN_NOT_VERIFIED` (409) em `api_code`.
+- `domains.set_tracking_domain(domain_id, host)` e `domains.remove_tracking_domain(domain_id)` (sync e async): host próprio para os links de abertura e clique, devolvendo `CustomHostStatus` (`None` na remoção quando não havia host). Erros `INVALID_TRACKING_HOST` (400), `TRACKING_DOMAINS_DISABLED` (409) e `DOMAIN_NOT_FOUND` (404) em `api_code`.
+- `DomainDetail.dkim_rotation`, `DomainDetail.return_path`, `DomainDetail.tracking_domain` e `DomainDetail.tracking_domains_available`.
+- `DomainWarmupStatus.status` (`WarmupStatus`: `warming` ou `completed`), `total_days`, `started_at` e `completed_at`.
+- Modelos exportados: `DkimRotation`, `CustomHostStatus` e `WarmupStatus`.
+- `templates.list_versions(template_id, *, limit, offset)`, `templates.get_version(template_id, version)` e `templates.restore_version(template_id, version)` (sync e async): histórico de versões do template e restauração (que gera uma versão nova). Erros `TEMPLATE_NOT_FOUND` e `TEMPLATE_VERSION_NOT_FOUND` (404) em `api_code`.
+- Recurso `validation` com `validation.validate(emails)` (sync e async): valida de 1 a 100 endereços (formato, MX, descartável) e devolve o saldo de créditos do mês. Créditos esgotados respondem `RateLimitError` com `api_code="VALIDATION_CREDITS_EXHAUSTED"`, sem retry automático.
+- `webhooks.get_delivery(webhook_id, delivery_id)` e `webhooks.replay_delivery(webhook_id, delivery_id)` (sync e async): detalhe da entrega com o corpo enviado e reenvio como entrega nova (`pending`). Erros `WEBHOOK_NOT_FOUND`/`WEBHOOK_DELIVERY_NOT_FOUND` (404) e `WEBHOOK_DELIVERY_PENDING`/`WEBHOOK_NOT_ACTIVE` (409) em `api_code`.
+- Modelos exportados: `TemplateVersionSummary`, `TemplateVersionDetail`, `ListTemplateVersionsResponse`, `ValidateEmailsResponse`, `EmailValidationResult`, `ValidationCredits` e `WebhookDeliveryDetail`.
+- `SendEmailPayload.template_id` documentado como id **ou** alias do template (a API passou a aceitar os dois).
+- Snapshot `spec/product.json` sincronizado com o contrato atual da API CoffeeMail.
 
 ### Alterado
 

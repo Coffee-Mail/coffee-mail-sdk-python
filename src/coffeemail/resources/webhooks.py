@@ -12,6 +12,7 @@ from coffeemail.models.webhooks import (
     RotateWebhookSecretResult,
     TestWebhookResult,
     ToggleWebhookResult,
+    WebhookDeliveryDetail,
     WebhookDeliveryStatus,
     WebhookDetail,
     WebhookStatus,
@@ -48,6 +49,10 @@ def _deliveries_params(
     return compact(
         eventType=event_type, status=status, limit=limit, **{"from": from_date, "to": to_date}
     )
+
+
+def _delivery_path(webhook_id: str, delivery_id: str) -> str:
+    return f"{WEBHOOKS_PATH}/{webhook_id}/deliveries/{delivery_id}"
 
 
 def _verify(
@@ -130,6 +135,19 @@ class Webhooks:
             "GET", f"{WEBHOOKS_PATH}/{webhook_id}/deliveries", params=params
         )
         return parse_model(res, ListWebhookDeliveriesResponse, self._transport.locale)
+
+    def get_delivery(
+        self, webhook_id: str, delivery_id: str
+    ) -> CoffeeMailResponse[WebhookDeliveryDetail]:
+        res = self._transport.request("GET", _delivery_path(webhook_id, delivery_id))
+        return parse_model(res, WebhookDeliveryDetail, self._transport.locale)
+
+    def replay_delivery(
+        self, webhook_id: str, delivery_id: str
+    ) -> CoffeeMailResponse[WebhookDeliveryDetail]:
+        """Reenfileira o mesmo corpo como uma entrega nova (``pending``)."""
+        res = self._transport.request("POST", f"{_delivery_path(webhook_id, delivery_id)}/replay")
+        return parse_model(res, WebhookDeliveryDetail, self._transport.locale)
 
     def test(self, webhook_id: str) -> CoffeeMailResponse[TestWebhookResult]:
         res = self._transport.request("POST", f"{WEBHOOKS_PATH}/{webhook_id}/test")
@@ -217,6 +235,21 @@ class AsyncWebhooks:
             "GET", f"{WEBHOOKS_PATH}/{webhook_id}/deliveries", params=params
         )
         return parse_model(res, ListWebhookDeliveriesResponse, self._transport.locale)
+
+    async def get_delivery(
+        self, webhook_id: str, delivery_id: str
+    ) -> CoffeeMailResponse[WebhookDeliveryDetail]:
+        res = await self._transport.request("GET", _delivery_path(webhook_id, delivery_id))
+        return parse_model(res, WebhookDeliveryDetail, self._transport.locale)
+
+    async def replay_delivery(
+        self, webhook_id: str, delivery_id: str
+    ) -> CoffeeMailResponse[WebhookDeliveryDetail]:
+        """Reenfileira o mesmo corpo como uma entrega nova (``pending``)."""
+        res = await self._transport.request(
+            "POST", f"{_delivery_path(webhook_id, delivery_id)}/replay"
+        )
+        return parse_model(res, WebhookDeliveryDetail, self._transport.locale)
 
     async def test(self, webhook_id: str) -> CoffeeMailResponse[TestWebhookResult]:
         res = await self._transport.request("POST", f"{WEBHOOKS_PATH}/{webhook_id}/test")

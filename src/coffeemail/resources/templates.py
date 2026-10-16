@@ -7,11 +7,13 @@ from coffeemail.models.broadcasts import TestSendResult
 from coffeemail.models.templates import (
     FormatTemplateResponse,
     ListTemplatesResponse,
+    ListTemplateVersionsResponse,
     PreviewTemplateResponse,
     TemplateDetail,
     TemplateFormat,
     TemplateLocale,
     TemplateVariable,
+    TemplateVersionDetail,
     TestRenderTemplateResponse,
 )
 from coffeemail.resources._common import build_input, compact, input_failure, parse_model
@@ -29,6 +31,14 @@ def _variables(variables: Sequence[VariableLike] | None) -> list[dict[str, objec
         for v in variables
     ]
     return [m.model_dump(by_alias=True, exclude_none=True) for m in models]
+
+
+def _versions_path(template_id: str) -> str:
+    return f"{TEMPLATES_PATH}/{template_id}/versions"
+
+
+def _version_path(template_id: str, version: int) -> str:
+    return f"{_versions_path(template_id)}/{version}"
 
 
 def _mapping(value: Mapping[str, object] | None) -> dict[str, object] | None:
@@ -229,6 +239,26 @@ class Templates:
         )
         return parse_model(res, TestSendResult, self._transport.locale)
 
+    def list_versions(
+        self, template_id: str, *, limit: int | None = None, offset: int | None = None
+    ) -> CoffeeMailResponse[ListTemplateVersionsResponse]:
+        """Lista as versões do template, da mais recente para a mais antiga."""
+        res = self._transport.request(
+            "GET", _versions_path(template_id), params=compact(limit=limit, offset=offset)
+        )
+        return parse_model(res, ListTemplateVersionsResponse, self._transport.locale)
+
+    def get_version(
+        self, template_id: str, version: int
+    ) -> CoffeeMailResponse[TemplateVersionDetail]:
+        res = self._transport.request("GET", _version_path(template_id, version))
+        return parse_model(res, TemplateVersionDetail, self._transport.locale)
+
+    def restore_version(self, template_id: str, version: int) -> CoffeeMailResponse[TemplateDetail]:
+        """Restaura o conteúdo de uma versão; a restauração gera uma versão nova."""
+        res = self._transport.request("POST", f"{_version_path(template_id, version)}/restore")
+        return parse_model(res, TemplateDetail, self._transport.locale)
+
 
 class AsyncTemplates:
     def __init__(self, transport: AsyncHttpTransport) -> None:
@@ -381,6 +411,30 @@ class AsyncTemplates:
             json_data=_test_send_body(to, from_email, subject, variables),
         )
         return parse_model(res, TestSendResult, self._transport.locale)
+
+    async def list_versions(
+        self, template_id: str, *, limit: int | None = None, offset: int | None = None
+    ) -> CoffeeMailResponse[ListTemplateVersionsResponse]:
+        """Lista as versões do template, da mais recente para a mais antiga."""
+        res = await self._transport.request(
+            "GET", _versions_path(template_id), params=compact(limit=limit, offset=offset)
+        )
+        return parse_model(res, ListTemplateVersionsResponse, self._transport.locale)
+
+    async def get_version(
+        self, template_id: str, version: int
+    ) -> CoffeeMailResponse[TemplateVersionDetail]:
+        res = await self._transport.request("GET", _version_path(template_id, version))
+        return parse_model(res, TemplateVersionDetail, self._transport.locale)
+
+    async def restore_version(
+        self, template_id: str, version: int
+    ) -> CoffeeMailResponse[TemplateDetail]:
+        """Restaura o conteúdo de uma versão; a restauração gera uma versão nova."""
+        res = await self._transport.request(
+            "POST", f"{_version_path(template_id, version)}/restore"
+        )
+        return parse_model(res, TemplateDetail, self._transport.locale)
 
 
 _KNOWN_FORMATS: dict[str, TemplateFormat] = {"html": "html", "react": "react"}
