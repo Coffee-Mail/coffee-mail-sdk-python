@@ -4,6 +4,21 @@ Todas as mudanças relevantes deste projeto são documentadas aqui. O formato se
 
 ## [Não lançado]
 
+### Adicionado
+
+- `broadcasts.create(..., scheduled_at=...)` (sync e async): ISO 8601 no futuro agenda a campanha, que nasce `scheduled`.
+- `BroadcastDetail.metrics` (`BroadcastMetrics`, exportado) com entregues, abertos, cliques, bounces, falhas e suprimidos.
+- `senders.resend_verification(sender_id)` (sync e async) reenvia o e-mail de verificação com token novo.
+- `ContactDetail.subscribed` (`False` quando o contato se descadastrou dos broadcasts).
+
+### Alterado
+
+- `broadcasts.send()` responde assim que o envio é enfileirado (`status="sending"`); o progresso acompanha-se por `broadcasts.get()`.
+
+### Depreciado
+
+- `CreatedSender.verification_token`: a API não devolve mais o token na resposta de `senders.create()`; o campo vira opcional (`None`) e a verificação acontece pelo link enviado ao e-mail do remetente.
+
 ## [0.2.0] - Não publicado
 
 Correções de contrato com a API. Como o SDK ainda não tinha usuários ativos, esta versão corrige o comportamento diretamente, sem camada de depreciação: há quebras de compatibilidade, listadas em **Alterado** e **Removido**.

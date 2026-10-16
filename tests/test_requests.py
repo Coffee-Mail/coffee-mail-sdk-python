@@ -267,3 +267,81 @@ async def test_async_senders_are_typed() -> None:
     res = await client.senders.list()
     assert res.data is not None
     assert res.data.senders == []
+
+
+def test_created_sender_without_token_still_parses() -> None:
+    body = {
+        "id": "s2",
+        "email": "vendas@x.com",
+        "displayName": None,
+        "verifiedAt": None,
+        "active": True,
+        "createdAt": "2026-10-15",
+    }
+    created = _client([], body).senders.create("vendas@x.com")
+    assert created.data is not None
+    assert created.data.verification_token is None
+
+
+def test_resend_verification_hits_the_route_and_types_errors() -> None:
+    captured: list[httpx.Request] = []
+    ok = _client(captured, None, 204).senders.resend_verification("s1")
+    assert ok.error is None
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/v1/product/senders/s1/resend-verification"
+    conflict = _client(
+        [], {"error": {"code": "CONFLICT", "message": "sender is already verified"}}, 409
+    ).senders.resend_verification("s1")
+    assert conflict.error is not None
+    missing = _client(
+        [], {"error": {"code": "NOT_FOUND", "message": "sender"}}, 404
+    ).senders.resend_verification("x")
+    assert missing.error is not None
+    assert missing.error.status_code == 404
+
+
+def test_broadcast_create_sends_scheduled_at_and_get_parses_metrics() -> None:
+    captured: list[httpx.Request] = []
+    detail = {
+        "id": "b1",
+        "audienceId": "a1",
+        "status": "scheduled",
+        "scheduledAt": "2030-01-01T10:00:00.000Z",
+        "createdAt": "2026-10-15",
+    }
+    _client(captured, detail, 201).broadcasts.create(
+        audience_id="a1",
+        from_email="news@acme.com",
+        template_id="tpl-1",
+        scheduled_at="2030-01-01T10:00:00.000Z",
+    )
+    assert _body(captured[0])["scheduledAt"] == "2030-01-01T10:00:00.000Z"
+    with_metrics = {
+        **detail,
+        "status": "sent",
+        "metrics": {
+            "delivered": 9,
+            "opened": 4,
+            "clicked": 1,
+            "bounced": 1,
+            "failed": 0,
+            "suppressed": 2,
+        },
+    }
+    got = _client([], with_metrics).broadcasts.get("b1")
+    assert got.data is not None
+    assert got.data.metrics is not None
+    assert got.data.metrics.delivered == 9
+
+
+def test_contact_subscribed_flag() -> None:
+    body = {
+        "contacts": [
+            {"id": "c1", "email": "a@x.com", "subscribed": False, "createdAt": "2026-10-15"},
+            {"id": "c2", "email": "b@x.com", "createdAt": "2026-10-15"},
+        ],
+        "total": 2,
+    }
+    page = _client([], body).audiences.contacts.list("aud-1")
+    assert page.data is not None
+    assert [c.subscribed for c in page.data.contacts] == [False, True]

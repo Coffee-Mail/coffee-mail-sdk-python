@@ -5,6 +5,15 @@ from pydantic import BaseModel, ConfigDict, Field
 BroadcastStatus = Literal["draft", "scheduled", "sending", "sent", "failed", "cancelled"]
 
 
+class BroadcastMetrics(BaseModel):
+    delivered: int = 0
+    opened: int = 0
+    clicked: int = 0
+    bounced: int = 0
+    failed: int = 0
+    suppressed: int = 0
+
+
 class BroadcastDetail(BaseModel):
     id: str
     audience_id: str = Field(alias="audienceId")
@@ -20,6 +29,7 @@ class BroadcastDetail(BaseModel):
     recipients_total: int = Field(default=0, alias="recipientsTotal")
     recipients_queued: int = Field(default=0, alias="recipientsQueued")
     recipients_failed: int = Field(default=0, alias="recipientsFailed")
+    metrics: BroadcastMetrics | None = None
     created_at: str = Field(alias="createdAt")
     updated_at: str | None = Field(default=None, alias="updatedAt")
 

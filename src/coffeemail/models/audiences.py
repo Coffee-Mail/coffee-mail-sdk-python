@@ -20,6 +20,7 @@ class ContactDetail(BaseModel):
     first_name: str | None = Field(default=None, alias="firstName")
     last_name: str | None = Field(default=None, alias="lastName")
     metadata: dict[str, object] = Field(default_factory=dict)
+    subscribed: bool = True
     created_at: str = Field(alias="createdAt")
 
     model_config = ConfigDict(populate_by_name=True)

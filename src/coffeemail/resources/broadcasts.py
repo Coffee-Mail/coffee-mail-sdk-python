@@ -40,6 +40,7 @@ def _create_body(
     text: str | None,
     reply_to: str | None,
     variables: Mapping[str, object] | None,
+    scheduled_at: str | None = None,
 ) -> dict[str, object]:
     return compact(
         audienceId=audience_id,
@@ -49,6 +50,7 @@ def _create_body(
         html=html,
         text=text,
         replyTo=reply_to,
+        scheduledAt=scheduled_at,
         variables=dict(variables) if variables is not None else None,
     )
 
@@ -96,9 +98,18 @@ class Broadcasts:
         text: str | None = None,
         reply_to: str | None = None,
         variables: Mapping[str, object] | None = None,
+        scheduled_at: str | None = None,
     ) -> CoffeeMailResponse[BroadcastDetail]:
         body = _create_body(
-            audience_id, from_email, subject, template_id, html, text, reply_to, variables
+            audience_id,
+            from_email,
+            subject,
+            template_id,
+            html,
+            text,
+            reply_to,
+            variables,
+            scheduled_at,
         )
         res = self._transport.request(
             "POST", BROADCASTS_PATH, json_data=body, permission_operation=OP_CREATE
@@ -167,9 +178,18 @@ class AsyncBroadcasts:
         text: str | None = None,
         reply_to: str | None = None,
         variables: Mapping[str, object] | None = None,
+        scheduled_at: str | None = None,
     ) -> CoffeeMailResponse[BroadcastDetail]:
         body = _create_body(
-            audience_id, from_email, subject, template_id, html, text, reply_to, variables
+            audience_id,
+            from_email,
+            subject,
+            template_id,
+            html,
+            text,
+            reply_to,
+            variables,
+            scheduled_at,
         )
         res = await self._transport.request(
             "POST", BROADCASTS_PATH, json_data=body, permission_operation=OP_CREATE
